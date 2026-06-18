@@ -12,7 +12,7 @@ import kotlinx.serialization.json.JsonObject
  * The primary interface to the Origon platform on Android.
  *
  * Backed by `libsession.so` via [SessionBridge]. One instance owns one
- * native handle and one tokio runtime; create at app start, call
+ * native handle and one smol executor; create at app start, call
  * [close] (or use `use { }`) at app shutdown.
  *
  * All fallible methods throw [SessionException] with a structured

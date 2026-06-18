@@ -171,7 +171,7 @@ internal object SessionBridge {
      * does not pass a content type.
      *
      * **Path-based, streamed from disk.** The SDK opens the file at
-     * [path] via `tokio::fs::File::open` inside its own process and
+     * [path] off-thread (smol `blocking`) inside its own process and
      * streams it through lumen's multipart encoder — the body is
      * never fully resident in memory, safe for arbitrarily large
      * files. Blocking — performs the HTTPS multipart POST on the
