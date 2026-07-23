@@ -310,6 +310,14 @@ sealed class DisconnectReason {
     data object IllegalState : DisconnectReason()
     data object ResourceExhausted : DisconnectReason()
     data object ReplayLost : DisconnectReason()
+
+    /**
+     * The server ended the session cleanly (`SESSION_ENDED`, 0x1040):
+     * the bridge collapsed (remote leg hung up / engine drained), the
+     * controller destroyed the session, or the engine reaped it idle.
+     * Terminal — the SDK does not reconnect; a transport close follows.
+     */
+    data object SessionEnded : DisconnectReason()
     data class ServerClosed(val code: Long, val detail: String?) : DisconnectReason()
 
     /**
@@ -334,6 +342,7 @@ sealed class DisconnectReason {
                 SessionBridge.DISCONNECT_REASON_ILLEGAL_STATE -> IllegalState
                 SessionBridge.DISCONNECT_REASON_RESOURCE_EXHAUSTED -> ResourceExhausted
                 SessionBridge.DISCONNECT_REASON_REPLAY_LOST -> ReplayLost
+                SessionBridge.DISCONNECT_REASON_SESSION_ENDED -> SessionEnded
                 SessionBridge.DISCONNECT_REASON_SERVER_CLOSED ->
                     ServerClosed(serverCode, serverDetail)
                 SessionBridge.DISCONNECT_REASON_TRANSPORT_CLOSED ->

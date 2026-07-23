@@ -303,4 +303,9 @@ internal object SessionBridge {
     const val DISCONNECT_REASON_REPLAY_LOST = 12
     const val DISCONNECT_REASON_SERVER_CLOSED = 13
     const val DISCONNECT_REASON_TRANSPORT_CLOSED = 14
+    /** Server ended the session (`SESSION_ENDED`, 0x1040) — bridge collapse,
+     *  controller destroy, or idle-GC reap. Terminal; a transport close
+     *  follows. Mirrors `SESSION_DISCONNECT_REASON_SESSION_ENDED` in the
+     *  Rust JNI bridge (`apps/sdk/session/src/jni_bridge.rs`). */
+    const val DISCONNECT_REASON_SESSION_ENDED = 15
 }
