@@ -255,6 +255,13 @@ data class Message(
     val timestamp: String? = null,
     val userId: String? = null,
     val userName: String? = null,
+    /**
+     * Lifecycle action for a `role == SYSTEM` row: `"queued"` | `"joined"`
+     * | `"left"` | `"ended"`. Set by connect on lifecycle system messages;
+     * absent on ordinary messages and on flow-bot system messages. Wire
+     * key: `action`.
+     */
+    val action: String? = null,
     val attachments: List<Attachment> = emptyList(),
     val errorText: String? = null,
     val status: MessageStatus = MessageStatus.DELIVERED,
@@ -296,6 +303,32 @@ data class SessionHistory(
 )
 
 // ── Disconnect / events ──────────────────────────────────────────────
+
+/**
+ * After-Call-Work offer carried on a chat [ClientEvent.ChatSessionEnded]
+ * for an **agent** participant (the wrap-up screen). Absent for the widget
+ * / visitor side. Wire keys mirror connect's chat `sessionEnded.acw` block.
+ */
+@Serializable
+data class Acw(
+    /** Always `true` when the block is present — its presence is the signal. */
+    val enabled: Boolean = false,
+    /** Wrap-up window in seconds. `0` ⇒ open-ended server-side. */
+    val duration: Long = 0,
+    /** The agent cannot finish wrap-up without a disposition. */
+    val enforce: Boolean = false,
+    /** RFC3339 instant the agent entered ACW. Wire key: `startedAt`. */
+    val startedAt: String? = null,
+    /** The team's disposition tags — the wrap-up chips. */
+    val dispositions: List<String> = emptyList(),
+)
+
+/** Decoded shape of the `EVENT_CHAT_SESSION_ENDED` `messageJson` slot. */
+@Serializable
+internal data class ChatSessionEndedPayload(
+    val reason: String = "",
+    val acw: Acw? = null,
+)
 
 sealed class DisconnectReason {
     data object LocalClose : DisconnectReason()
@@ -395,6 +428,19 @@ sealed class ClientEvent {
     data class Typing(
         override val sessionId: String,
         val isTyping: Boolean,
+    ) : ClientEvent()
+
+    /**
+     * The chat session ended cleanly by an explicit server signal
+     * (connect's chat `sessionEnded` SSE frame) — distinct from a
+     * transport-level [Disconnected], which does NOT follow it. [acw]
+     * carries the agent wrap-up offer; `null` for the widget / visitor
+     * side. Android ships no chat UI today — surfaced for wire parity.
+     */
+    data class ChatSessionEnded(
+        override val sessionId: String,
+        val reason: String,
+        val acw: Acw? = null,
     ) : ClientEvent()
 
     data class Connected(override val sessionId: String) : ClientEvent()

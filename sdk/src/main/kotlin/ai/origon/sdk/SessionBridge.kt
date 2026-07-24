@@ -274,6 +274,11 @@ internal object SessionBridge {
     const val EVENT_CALL_ERROR = 13
     const val EVENT_AUDIO_ROUTE_CHANGED = 14
 
+    /** Chat session ended cleanly by server signal — `messageJson` carries
+     *  the `{reason, acw?}` payload as JSON. No `EVENT_DISCONNECTED`
+     *  follows. Mirrors `SESSION_EVENT_CHAT_SESSION_ENDED` in `jni_bridge.rs`. */
+    const val EVENT_CHAT_SESSION_ENDED = 15
+
     // Error discriminants — value of SessionException.kind.
     const val ERROR_NOT_INITIALIZED = 1
     const val ERROR_NO_SESSION = 2

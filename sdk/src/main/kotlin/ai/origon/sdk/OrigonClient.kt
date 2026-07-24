@@ -516,6 +516,11 @@ class OrigonClient(
             SessionBridge.EVENT_TYPING ->
                 ClientEvent.Typing(sid, raw.typing)
 
+            SessionBridge.EVENT_CHAT_SESSION_ENDED -> {
+                val payload = decodeSessionEnded(raw.messageJson)
+                ClientEvent.ChatSessionEnded(sid, payload.reason, payload.acw)
+            }
+
             SessionBridge.EVENT_CONNECTED ->
                 ClientEvent.Connected(sid)
 
@@ -582,6 +587,22 @@ class OrigonClient(
             // raw JSON, which contains message content.
             android.util.Log.w("OrigonSDK", "decodeMessage: dropping event, JSON parse failed: ${e.message}")
             null
+        }
+    }
+
+    /**
+     * Decode the `messageJson` slot for [ClientEvent.ChatSessionEnded]
+     * (`{reason, acw?}`). Returns a default payload (empty reason, no acw)
+     * on any parse failure — the chat session is over regardless, so this
+     * event must still surface.
+     */
+    private fun decodeSessionEnded(json: String?): ChatSessionEndedPayload {
+        if (json.isNullOrEmpty()) return ChatSessionEndedPayload()
+        return try {
+            JSON.decodeFromString(ChatSessionEndedPayload.serializer(), json)
+        } catch (e: Throwable) {
+            android.util.Log.w("OrigonSDK", "decodeSessionEnded: parse failed, defaulting: ${e.message}")
+            ChatSessionEndedPayload()
         }
     }
 
