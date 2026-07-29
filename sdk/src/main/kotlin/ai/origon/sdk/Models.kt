@@ -8,34 +8,24 @@ import kotlinx.serialization.json.JsonObject
 
 @Serializable
 enum class Channel {
+    // `Channel` no longer crosses the native boundary as an int: the split
+    // into startCall/startChat + joinCall/joinChat removed the runtime
+    // discriminator every signature used to carry. The enum survives only
+    // where the SERVER names a channel in a JSON payload, which
+    // `kotlinx.serialization` handles from the @SerialName values below.
     @SerialName("chat") CHAT,
     @SerialName("voice") VOICE;
 
-    internal fun toBridge(): Int = when (this) {
-        CHAT -> SessionBridge.CHANNEL_CHAT
-        VOICE -> SessionBridge.CHANNEL_VOICE
-    }
-
     internal companion object {
-        fun fromBridge(value: Int): Channel = when (value) {
-            SessionBridge.CHANNEL_CHAT -> CHAT
-            SessionBridge.CHANNEL_VOICE -> VOICE
-            else -> throw SessionException(
-                kind = SessionBridge.ERROR_OTHER,
-                statusCode = 0,
-                code = null,
-                message = "unknown channel discriminant: $value",
-            )
-        }
-
-        fun fromWire(s: String): Channel = when (s) {
-            "voice" -> VOICE
+        /** Parse the channel name the SERVER puts in a JSON payload. */
+        fun fromWire(value: String): Channel = when (value) {
             "chat" -> CHAT
+            "voice" -> VOICE
             else -> throw SessionException(
                 kind = SessionBridge.ERROR_OTHER,
                 statusCode = 0,
                 code = null,
-                message = "unknown channel: $s",
+                message = "unknown channel: $value",
             )
         }
     }
@@ -130,8 +120,28 @@ data class ClientConfig(
     val attributes: JsonObject? = null,
 )
 
-data class StartSessionOptions(
-    val channel: Channel,
+data class StartCallOptions(
+    /** Existing session id to resume; null for a new session. */
+    val sessionId: String? = null,
+    /** Optional consumer-defined raw JSON forwarded as `data` on the wire. */
+    val data: String? = null,
+)
+
+/**
+ * Options for [OrigonClient.startChat].
+ *
+ * [firstMessage] is REQUIRED, and that is the whole point of the split from
+ * the old `startSession`. The server runs a two-stage gate on every chat: the
+ * flow does not start until the visitor has actually said something, and a
+ * session that stays silent past the deadline is reaped. An API that opened a
+ * session and then waited for a human to type was racing that deadline;
+ * carrying the message here makes the race unreachable.
+ *
+ * Attachment-only is valid — the gate fires on ANY visitor content.
+ */
+data class StartChatOptions(
+    /** The visitor's first message. Required. */
+    val firstMessage: SendMessagePayload,
     /** Existing session id to resume; null for a new session. */
     val sessionId: String? = null,
     /** Optional consumer-defined raw JSON forwarded as `data` on the wire. */
@@ -145,8 +155,12 @@ data class StartSessionResponse(
     val token: String,
 )
 
-data class JoinSessionInput(
-    val channel: Channel,
+/**
+ * Input for [OrigonClient.joinCall] / [OrigonClient.joinChat] — a
+ * previously-obtained [StartSessionResponse]. No channel: the method carries
+ * it.
+ */
+data class JoinInput(
     val sessionId: String,
     val url: String,
     val token: String,

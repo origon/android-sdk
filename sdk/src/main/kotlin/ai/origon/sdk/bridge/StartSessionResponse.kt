@@ -1,7 +1,7 @@
 package ai.origon.sdk.bridge
 
 /**
- * Response from `SessionBridge.startSession`.
+ * Response from `SessionBridge.startCall` / `SessionBridge.startChat`.
  *
  * **ABI-locked constructor signature.** The Rust JNI bridge
  * (`client-sdk/session/src/jni_bridge.rs::build_start_response_object`)

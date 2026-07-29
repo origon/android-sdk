@@ -69,7 +69,7 @@ internal object SessionBridge {
 
     /**
      * Replace session-level attributes injected as `data.attributes` on
-     * subsequent `startSession` calls. Null or empty clears.
+     * subsequent `startCall` / `startChat` calls. Null or empty clears.
      */
     @JvmStatic external fun setAttributes(handle: Long, attributesJson: String?)
 
@@ -99,9 +99,27 @@ internal object SessionBridge {
      * @param sessionId pass an existing session id to resume; null to create new.
      * @param dataJson optional consumer-defined raw JSON payload.
      */
-    @JvmStatic external fun startSession(
+    @JvmStatic external fun startCall(
         handle: Long,
-        channel: Int,
+        sessionId: String?,
+        dataJson: String?,
+    ): StartSessionResponse
+
+    /**
+     * Start a chat, sending the visitor's first message as part of the call.
+     * [firstMessageJson] is REQUIRED — a `SendMessagePayload` JSON, the same
+     * shape [sendMessage] takes.
+     *
+     * The server reaps a chat that stays silent past its first-message
+     * deadline, so an API that opened a session and then waited for a human to
+     * type was racing that reap. Carrying the message here makes the race
+     * unreachable. A first message that fails to DELIVER does not throw — the
+     * session is live and the failure arrives as `MessageUpdated` with
+     * `status = failed`; only a TERMINAL refusal throws.
+     */
+    @JvmStatic external fun startChat(
+        handle: Long,
+        firstMessageJson: String,
         sessionId: String?,
         dataJson: String?,
     ): StartSessionResponse
@@ -111,9 +129,21 @@ internal object SessionBridge {
      * of band (multi-device handoff, deeplink, persisted session).
      * Skips the HTTPS call and dials the transport directly.
      */
-    @JvmStatic external fun joinSession(
+    @JvmStatic external fun joinCall(
         handle: Long,
-        channel: Int,
+        sessionId: String,
+        url: String,
+        token: String,
+    )
+
+    /**
+     * Attach to an existing chat obtained out of band — the agent /
+     * chat-offered path. Takes NO first message, unlike [startChat]: joining
+     * is entering a room whose first-message gate is ALREADY released, which
+     * is why this participant is being offered the conversation.
+     */
+    @JvmStatic external fun joinChat(
+        handle: Long,
         sessionId: String,
         url: String,
         token: String,
@@ -245,10 +275,6 @@ internal object SessionBridge {
     @JvmStatic external fun pollEvent(handle: Long): SessionEvent?
 
     // ── Discriminant constants (mirrored from Rust) ──────────────────
-
-    // Channel — see SessionBridge.startSession(channel: Int).
-    const val CHANNEL_CHAT = 0
-    const val CHANNEL_VOICE = 1
 
     // Audio output route — see SessionBridge.setAudioOutput(route: Int).
     const val AUDIO_OUTPUT_DEFAULT = 0
