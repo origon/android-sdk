@@ -382,10 +382,14 @@ class OrigonClient(
     // ── Attachments ──────────────────────────────────────────────────
 
     /**
-     * Upload a file from the local filesystem to the named session and
-     * return the server-issued [Attachment]. The SDK streams the body
-     * straight from disk; auto-detects MIME from a 256-byte head plus
-     * the [fileName] extension. Runs on [Dispatchers.IO].
+     * Upload a file from the local filesystem against the widget this
+     * client was created for, and return the server-issued [Attachment].
+     * The SDK streams the body straight from disk; auto-detects MIME from
+     * a 256-byte head plus the [fileName] extension. Runs on
+     * [Dispatchers.IO].
+     *
+     * There is no `sessionId` and no session prerequisite — an attachment
+     * can be the first thing a visitor sends.
      *
      * [uploadId] doubles as the cancellation key — pass it as
      * `attachmentId` to [deleteAttachment] while the upload is in
@@ -403,7 +407,6 @@ class OrigonClient(
      * for wire failures, `ERROR_CANCELLED` when cancelled.
      */
     suspend fun uploadAttachment(
-        sessionId: String,
         path: String,
         fileName: String,
         uploadId: String = UUID.randomUUID().toString(),
@@ -422,7 +425,6 @@ class OrigonClient(
         val json = withContext(Dispatchers.IO) {
             SessionBridge.uploadAttachment(
                 handle,
-                sessionId,
                 uploadId,
                 path,
                 fileName,
@@ -439,7 +441,6 @@ class OrigonClient(
      * The SDK can't open `content://` URIs directly.
      */
     suspend fun uploadAttachment(
-        sessionId: String,
         uri: android.net.Uri,
         fileName: String,
         uploadId: String = UUID.randomUUID().toString(),
@@ -462,7 +463,6 @@ class OrigonClient(
         }
         return try {
             uploadAttachment(
-                sessionId = sessionId,
                 path = tempFile.absolutePath,
                 fileName = fileName,
                 uploadId = uploadId,
@@ -478,7 +478,6 @@ class OrigonClient(
      * app's cache dir first, then delegates to the path-based overload.
      */
     suspend fun uploadAttachment(
-        sessionId: String,
         bytes: ByteArray,
         fileName: String,
         uploadId: String = UUID.randomUUID().toString(),
@@ -494,7 +493,6 @@ class OrigonClient(
         }
         return try {
             uploadAttachment(
-                sessionId = sessionId,
                 path = tempFile.absolutePath,
                 fileName = fileName,
                 uploadId = uploadId,
@@ -506,8 +504,8 @@ class OrigonClient(
     }
 
     /**
-     * Cancel an in-flight upload or delete a completed attachment on
-     * the named session.
+     * Cancel an in-flight upload or delete a completed attachment.
+     * Session-less like [uploadAttachment].
      *
      * `attachmentId` is dual-purpose: it can be either the `uploadId`
      * passed to [uploadAttachment] (cancels the in-flight upload — no
@@ -517,15 +515,15 @@ class OrigonClient(
      * server). The SDK figures it out: it checks its in-flight uploads
      * table first, then falls through to the wire call.
      *
-     * Runs on [Dispatchers.IO]. A 404 from the server surfaces as
-     * [SessionException] with `kind = SessionBridge.ERROR_HTTP` and
-     * `statusCode == 404` — safe to treat as success when your intent
-     * was "remove the draft from the UI".
+     * Runs on [Dispatchers.IO]. The server is idempotent on a missing
+     * object and answers 204, so a successful return does not prove the
+     * id existed; a 404 means the route did not match. An id that could
+     * not form a usable path is refused by the SDK before any request.
      */
-    suspend fun deleteAttachment(sessionId: String, attachmentId: String) {
+    suspend fun deleteAttachment(attachmentId: String) {
         ensureOpen()
         withContext(Dispatchers.IO) {
-            SessionBridge.deleteAttachment(handle, sessionId, attachmentId)
+            SessionBridge.deleteAttachment(handle, attachmentId)
         }
     }
 

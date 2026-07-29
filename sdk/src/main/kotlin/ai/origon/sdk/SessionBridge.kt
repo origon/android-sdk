@@ -196,9 +196,12 @@ internal object SessionBridge {
     // ── Attachments ──────────────────────────────────────────────────
 
     /**
-     * Upload `bytes` as an attachment on the named session. MIME is
-     * auto-detected by the SDK from the content + [name]; the caller
-     * does not pass a content type.
+     * Upload a file as an attachment against the WIDGET the handle was
+     * created against. MIME is auto-detected by the SDK from the content
+     * + [name]; the caller does not pass a content type.
+     *
+     * There is NO session argument and no session prerequisite — an
+     * attachment can be the first thing a visitor sends.
      *
      * **Path-based, streamed from disk.** The SDK opens the file at
      * [path] off-thread (smol `blocking`) inside its own process and
@@ -219,8 +222,7 @@ internal object SessionBridge {
      * same value to [deleteAttachment] (as the `key` argument) to
      * cancel this upload before it completes. After upload completes
      * successfully, use the server-issued `attachment.id` for deletion
-     * instead. The pair (`sessionId`, `uploadId`) must be unique
-     * across active uploads.
+     * instead. [uploadId] must be unique across active uploads.
      *
      * [progressCb] is optional. When provided, its `onProgress` fires
      * from a Rust worker thread (see [UploadProgressCallback]).
@@ -235,7 +237,6 @@ internal object SessionBridge {
      */
     @JvmStatic external fun uploadAttachment(
         handle: Long,
-        sessionId: String,
         uploadId: String,
         path: String,
         name: String,
@@ -248,12 +249,11 @@ internal object SessionBridge {
      * upload table (keyed by `uploadId`) first; if found, the upload
      * is cancelled with no network call. Otherwise `key` is treated
      * as a server-issued `attachment.id` and the SDK calls
-     * `DELETE <sessionUrl>/attachment/:key`. Blocking — use from
-     * [Dispatchers.IO].
+     * `DELETE <endpoint>/attachment/:key`. Session-less like
+     * [uploadAttachment]. Blocking — use from [Dispatchers.IO].
      */
     @JvmStatic external fun deleteAttachment(
         handle: Long,
-        sessionId: String,
         key: String,
     )
 
