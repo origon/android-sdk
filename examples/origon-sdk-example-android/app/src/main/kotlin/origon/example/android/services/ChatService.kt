@@ -1,13 +1,12 @@
 package origon.example.android.services
 
 import android.net.Uri
-import ai.origon.sdk.Channel
 import ai.origon.sdk.ClientEvent
 import ai.origon.sdk.DisconnectReason
 import ai.origon.sdk.Message
 import ai.origon.sdk.SendMessagePayload
 import ai.origon.sdk.SessionException
-import ai.origon.sdk.StartSessionOptions
+import ai.origon.sdk.StartChatOptions
 import ai.origon.sdk.UploadProgress
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -105,13 +104,15 @@ class ChatService(private val manager: SDKManager) {
         }
         val client = manager.client ?: return
         try {
+            // View-only open: fetch the history and render it, but do NOT
+            // call startChat — that verb exists to open a session WITH the
+            // visitor's first message, and opening one here just to read a
+            // past conversation would attach a participant and start a chat
+            // nobody has spoken in. The session goes live on the first send.
             val history = withContext(Dispatchers.IO) { client.getSession(id) }
-            val response = withContext(Dispatchers.IO) {
-                client.startSession(StartSessionOptions(channel = Channel.CHAT, sessionId = id))
-            }
-            sessionsState.update { it + (response.sessionId to SessionUIState(messages = history.history)) }
-            _currentSessionId.value = response.sessionId
-            adoptDrafts(response.sessionId)
+            sessionsState.update { it + (id to SessionUIState(messages = history.history)) }
+            _currentSessionId.value = id
+            adoptDrafts(id)
             runCatching { manager.getSessions() }
         } catch (e: Throwable) {
             _error.tryEmit("Failed to open session: ${e.message}")
@@ -140,16 +141,24 @@ class ChatService(private val manager: SDKManager) {
     }
 
     /**
-     * Send a text message + completed attachments on the focused session.
-     * Lazily opens a fresh chat session on the first send when there is
-     * none. Does not mutate [messages] directly — the SDK fires
-     * MessageAdded / MessageUpdated which [handleEvent] applies.
+     * Send a text message + completed attachments.
+     *
+     * With a session already focused this is a plain `sendMessage`. With
+     * none, the send IS the open: `startChat` carries the visitor's first
+     * message, so there is no window where a session exists but has said
+     * nothing (the server gates the flow on visitor content and reaps a
+     * silent session — see [StartChatOptions]).
+     *
+     * Does not mutate [messages] directly — the SDK fires MessageAdded /
+     * MessageUpdated which [handleEvent] applies.
      */
     suspend fun sendMessage(text: String) {
         val trimmed = text.trim()
         try {
-            val id = ensureChatSession()
-            val completed = (sessionsState.value[id]?.pendingAttachments ?: emptyList())
+            // Read tiles through the projection: with no session focused they
+            // are still on the draft list, and an attachment-only first
+            // message is valid.
+            val completed = pendingAttachments.value
                 .mapNotNull { if (it.status == PendingAttachment.Status.COMPLETED) it.attachment else null }
             if (trimmed.isEmpty() && completed.isEmpty()) return
             val client = manager.client ?: return
@@ -158,7 +167,13 @@ class ChatService(private val manager: SDKManager) {
                 text = trimmed.ifEmpty { null },
                 attachments = completed,
             )
-            withContext(Dispatchers.IO) { client.sendMessage(id, payload) }
+            val focused = _currentSessionId.value
+            val id = if (focused != null) {
+                withContext(Dispatchers.IO) { client.sendMessage(focused, payload) }
+                focused
+            } else {
+                openAndSend(payload)
+            }
 
             // Completed attachments now belong to the sent message.
             sessionsState.update { states ->
@@ -336,18 +351,30 @@ class ChatService(private val manager: SDKManager) {
     // MARK: - Upload internals
 
     /**
-     * Resolve a chat session id — focused if already open, otherwise start
-     * one. Only the SEND path calls this; uploads are widget-scoped and
-     * never open a session. The mutex means at most one `POST
-     * /session/start` fires per send burst.
+     * Open a chat session by SENDING — `startChat` carries [payload] as the
+     * visitor's first message and returns the new session id.
+     *
+     * This is the only path that opens a chat. Uploads are widget-scoped and
+     * never open one, and the sidebar's [openSession] is view-only.
+     *
+     * The mutex means a second send arriving while a start is in flight
+     * waits and then sends normally — it must NOT start its own session, and
+     * it can't join by payload either, since the first message is already
+     * spoken for.
      */
-    private suspend fun ensureChatSession(): String {
-        _currentSessionId.value?.let { return it }
+    private suspend fun openAndSend(payload: SendMessagePayload): String {
+        val client = manager.client ?: throw IllegalStateException("SDK not initialized")
         return startMutex.withLock {
-            _currentSessionId.value?.let { return@withLock it }
-            val client = manager.client ?: throw IllegalStateException("SDK not initialized")
+            _currentSessionId.value?.let { existing ->
+                withContext(Dispatchers.IO) { client.sendMessage(existing, payload) }
+                return@withLock existing
+            }
+            // startChat returns the session id BEFORE the message goes out,
+            // and a first message that fails to DELIVER does not throw — it
+            // arrives as MessageUpdated(FAILED) so the user can retry. Only a
+            // terminal refusal throws.
             val response = withContext(Dispatchers.IO) {
-                client.startSession(StartSessionOptions(channel = Channel.CHAT, sessionId = null))
+                client.startChat(StartChatOptions(firstMessage = payload))
             }
             val newId = response.sessionId
             // Merge any draft tiles queued while the start was in flight.
