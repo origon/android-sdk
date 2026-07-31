@@ -244,6 +244,53 @@ data class UploadProgress(
 )
 
 /**
+ * One option on an interactive flow prompt — [Message.buttons], or a
+ * gallery card's own button stack.
+ *
+ * The visitor answers by sending [SendMessagePayload.value] set to this
+ * option's [value]. The server matches on **[value]**, never on [label].
+ */
+@Serializable
+data class MessageButton(
+    /**
+     * The caption to render. Wire key `label` on this lane — the platform
+     * GraphQL read spells the same field `text`, so payloads from that
+     * source are not interchangeable with these.
+     */
+    val label: String = "",
+    /** The match key, sent back as [SendMessagePayload.value]. */
+    val value: String = "",
+    /**
+     * Authored kind — `"text"` / `"postback"` / `"url"`. A free string,
+     * not an enum: an unknown kind must degrade, not fail to decode.
+     *
+     * The wire key is **`type`**; without the [SerialName] it would
+     * serialize as `buttonType` and decode to empty, silently turning
+     * every URL button into a plain postback.
+     */
+    @SerialName("type") val buttonType: String = "",
+)
+
+/** One card in a [Message.gallery] carousel. */
+@Serializable
+data class MessageCard(
+    /**
+     * Card heading. Doubles as the gallery match key — a reply sends it
+     * as [SendMessagePayload.galleryLabel].
+     */
+    val title: String = "",
+    val description: String = "",
+    /**
+     * **Nullable, and legitimately so** — the server emits `null` for a
+     * card authored without an image. A card with no image is valid, not
+     * malformed; guard before rendering.
+     */
+    val image: Attachment? = null,
+    /** This card's own options, same shape as the top-level array. */
+    val buttons: List<MessageButton> = emptyList(),
+)
+
+/**
  * One transcript line / message. Mirrors the Rust `Message` shape.
  *
  * For outbound sends the SDK fires `MessageAdded` with a provisional
@@ -277,6 +324,18 @@ data class Message(
      */
     val action: String? = null,
     val attachments: List<Attachment> = emptyList(),
+    /**
+     * Interactive prompt options on a flow-authored `role == SYSTEM` row.
+     * Empty on every ordinary message — a non-empty list is what makes
+     * this message a prompt. Note a prompt carries NO [action], so it
+     * renders as a bubble, not a lifecycle divider.
+     */
+    val buttons: List<MessageButton> = emptyList(),
+    /**
+     * Gallery-card carousel on a flow-authored `role == SYSTEM` row — the
+     * card-shaped sibling of [buttons]. Empty on ordinary messages.
+     */
+    val gallery: List<MessageCard> = emptyList(),
     val errorText: String? = null,
     val status: MessageStatus = MessageStatus.DELIVERED,
     val state: MessageState = MessageState.COMPLETED,
@@ -288,6 +347,23 @@ data class SendMessagePayload(
     val text: String? = null,
     val html: String? = null,
     val attachments: List<Attachment> = emptyList(),
+    /**
+     * The chosen [MessageButton.value] when this send answers an
+     * interactive prompt. The server matches a button on this, falling
+     * back to [text] — so [text] must ALSO be set (to the option's
+     * label): a body with no text/html/attachments is refused with a 400
+     * before the flow ever sees it.
+     *
+     * Omitted from the wire when null (`encodeDefaults` is off).
+     */
+    val value: String? = null,
+    /**
+     * The picked [MessageCard.title] when answering a gallery prompt.
+     * The server matches a gallery pick on the PAIR
+     * `(galleryLabel, value)`, which is what disambiguates two cards
+     * sharing a button value. Leave null for a plain button reply.
+     */
+    val galleryLabel: String? = null,
 )
 
 @Serializable
