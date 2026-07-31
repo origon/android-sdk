@@ -45,7 +45,12 @@ class ChatService(private val manager: SDKManager) {
     private val _currentSessionId = MutableStateFlow<String?>(null)
     val currentSessionId: StateFlow<String?> = _currentSessionId
 
-    /** Pending uploads queued before any chat session exists. */
+    /**
+     * Pending uploads queued before any chat session exists. Uploads no
+     * longer wait on a session, so this list is drained by whichever comes
+     * first: [ensureChatSession] (the lazy start on the first send) or
+     * [adoptDrafts] (the user focusing an existing session).
+     */
     private val draftPending = MutableStateFlow<List<PendingAttachment>>(emptyList())
 
     /** Transient errors for the UI to toast. */
@@ -95,6 +100,7 @@ class ChatService(private val manager: SDKManager) {
         }
         if (sessionsState.value[id] != null) {
             _currentSessionId.value = id
+            adoptDrafts(id)
             return
         }
         val client = manager.client ?: return
@@ -105,10 +111,32 @@ class ChatService(private val manager: SDKManager) {
             }
             sessionsState.update { it + (response.sessionId to SessionUIState(messages = history.history)) }
             _currentSessionId.value = response.sessionId
+            adoptDrafts(response.sessionId)
             runCatching { manager.getSessions() }
         } catch (e: Throwable) {
             _error.tryEmit("Failed to open session: ${e.message}")
         }
+    }
+
+    /**
+     * Move any draft tiles onto the session being focused.
+     *
+     * The draft list holds rows picked while nothing was open. Uploads no
+     * longer wait on a session, so nothing drains that list on its own any
+     * more — and the [pendingAttachments] projection stops reading it the
+     * moment a real session is focused. Left alone, a tile picked before
+     * opening a conversation would vanish from the composer (unremovable,
+     * its blob stranded on the server) and then silently reappear on
+     * whichever session happened to be started next.
+     */
+    private fun adoptDrafts(id: String) {
+        val drafts = draftPending.value
+        if (drafts.isEmpty()) return
+        sessionsState.update { states ->
+            val s = states[id] ?: return@update states
+            states + (id to s.copy(pendingAttachments = s.pendingAttachments + drafts))
+        }
+        draftPending.value = emptyList()
     }
 
     /**
@@ -174,6 +202,9 @@ class ChatService(private val manager: SDKManager) {
      * Queue a file upload onto the focused session (or the draft list
      * when no session is open yet). The tile appears immediately at
      * progress 0; live updates land via the SDK's progress callback.
+     *
+     * The write lane is widget-scoped, so no session is opened for the
+     * upload — an attachment can be the first thing a visitor sends.
      */
     fun uploadFile(uri: Uri, fileName: String, contentType: String) {
         val localId = UUID.randomUUID().toString()
@@ -191,7 +222,6 @@ class ChatService(private val manager: SDKManager) {
 
     fun removePendingAttachment(id: String) {
         var removed: PendingAttachment? = null
-        var hostSessionId: String? = null
 
         // Search the draft list first, then every session's pending list.
         draftPending.value.firstOrNull { it.id == id }?.let { row ->
@@ -202,7 +232,6 @@ class ChatService(private val manager: SDKManager) {
             for ((sid, state) in sessionsState.value) {
                 val row = state.pendingAttachments.firstOrNull { it.id == id } ?: continue
                 removed = row
-                hostSessionId = sid
                 sessionsState.update { states ->
                     val s = states[sid] ?: return@update states
                     states + (sid to s.copy(
@@ -217,18 +246,19 @@ class ChatService(private val manager: SDKManager) {
         val client = manager.client ?: return
         when (row.status) {
             PendingAttachment.Status.UPLOADING -> {
-                val sid = hostSessionId ?: return
                 // deleteAttachment matches the local id against the SDK's
-                // in-flight upload table and cancels it.
+                // in-flight upload table and cancels it. Fires regardless of
+                // which list hosted the row — the write lane is
+                // widget-scoped, and a draft-list upload is now the common
+                // case since uploads no longer wait on a session.
                 manager.scope.launch {
-                    runCatching { client.deleteAttachment(sid, id) }
+                    runCatching { client.deleteAttachment(id) }
                 }
             }
             PendingAttachment.Status.COMPLETED -> {
-                val sid = hostSessionId ?: return
                 val serverId = row.attachment?.id ?: return
                 manager.scope.launch {
-                    runCatching { client.deleteAttachment(sid, serverId) }
+                    runCatching { client.deleteAttachment(serverId) }
                 }
             }
             PendingAttachment.Status.ERROR -> Unit // local remove only
@@ -305,6 +335,12 @@ class ChatService(private val manager: SDKManager) {
 
     // MARK: - Upload internals
 
+    /**
+     * Resolve a chat session id — focused if already open, otherwise start
+     * one. Only the SEND path calls this; uploads are widget-scoped and
+     * never open a session. The mutex means at most one `POST
+     * /session/start` fires per send burst.
+     */
     private suspend fun ensureChatSession(): String {
         _currentSessionId.value?.let { return it }
         return startMutex.withLock {
@@ -333,19 +369,16 @@ class ChatService(private val manager: SDKManager) {
             updatePending(localId) { it.copy(status = PendingAttachment.Status.ERROR, errorText = "Client not ready") }
             return
         }
-        val sid = try {
-            ensureChatSession()
-        } catch (e: Throwable) {
-            updatePending(localId) { it.copy(status = PendingAttachment.Status.ERROR, errorText = "Couldn't start chat session") }
-            return
-        }
-
-        // If the user removed the tile while we waited for the session, abort.
+        // `uploadFile` appends the row and then LAUNCHES this coroutine, so a
+        // × tap can run in between. If the row is gone by the time we get
+        // here, abort before any wire work starts — the cancel it fired
+        // landed before the SDK registered its in-flight entry, so it would
+        // have degraded to a DELETE of an id the server never saw, leaving an
+        // orphan blob behind this upload.
         if (!pendingExists(localId)) return
 
         try {
             val attachment = client.uploadAttachment(
-                sessionId = sid,
                 uri = uri,
                 fileName = fileName,
                 uploadId = localId,
