@@ -79,6 +79,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import origon.example.android.R
 import origon.example.android.data.PendingAttachment
+import origon.example.android.services.ChatService
 import origon.example.android.services.SDKManager
 import origon.example.android.ui.call.CallView
 import origon.example.android.ui.components.AttachmentsPreview
@@ -381,6 +382,19 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                             preview = PreviewRequest(message.attachments, index)
                         },
                         onDownloadAttachment = downloader::download,
+                        promptIsLive = chat::promptIsLive,
+                        promptSelection = chat::selectionFor,
+                        onPromptReply = { promptId, cardIndex, label, value, galleryLabel ->
+                            scope.launch {
+                                chat.sendButtonReply(
+                                    promptId = promptId,
+                                    cardIndex = cardIndex,
+                                    label = label,
+                                    value = value,
+                                    galleryLabel = galleryLabel,
+                                )
+                            }
+                        },
                     )
                 }
             }
@@ -466,6 +480,10 @@ private fun Transcript(
     onToggleRevealed: (String) -> Unit,
     onAttachmentTap: (Message, Int) -> Unit,
     onDownloadAttachment: (Attachment) -> Unit,
+    promptIsLive: (Message) -> Boolean,
+    promptSelection: (String) -> ChatService.PromptSelection?,
+    /** `(promptId, cardIndex, label, value, galleryLabel)`. */
+    onPromptReply: (String, Int?, String, String, String?) -> Unit,
 ) {
     val listState = rememberLazyListState()
 
@@ -487,12 +505,25 @@ private fun Transcript(
         // row's reveal state onto another as rows are inserted.
         items(messages, key = { it.stableKey() }) { message ->
             val key = message.stableKey()
+            val hasPrompt = message.buttons.isNotEmpty() || message.gallery.isNotEmpty()
             MessageBubble(
                 message = message,
                 revealed = revealedKey == key,
                 onToggleRevealed = { onToggleRevealed(key) },
                 onAttachmentTap = { index -> onAttachmentTap(message, index) },
                 onDownloadAttachment = onDownloadAttachment,
+                // Computed only for rows that actually carry a prompt — both
+                // reads scan the transcript, and paying that on every plain
+                // bubble would make the list O(n²) in message count.
+                promptIsLive = hasPrompt && promptIsLive(message),
+                promptSelection = if (hasPrompt) promptSelection(message.id) else null,
+                onPromptReply = if (!hasPrompt) {
+                    null
+                } else {
+                    { cardIndex, label, value, galleryLabel ->
+                        onPromptReply(message.id, cardIndex, label, value, galleryLabel)
+                    }
+                },
             )
         }
         if (isTyping) {

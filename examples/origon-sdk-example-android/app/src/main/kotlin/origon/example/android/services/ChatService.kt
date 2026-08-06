@@ -4,6 +4,7 @@ import android.net.Uri
 import ai.origon.sdk.ClientEvent
 import ai.origon.sdk.DisconnectReason
 import ai.origon.sdk.Message
+import ai.origon.sdk.MessageRole
 import ai.origon.sdk.SendMessagePayload
 import ai.origon.sdk.SessionException
 import ai.origon.sdk.StartChatOptions
@@ -38,7 +39,25 @@ class ChatService(private val manager: SDKManager) {
         val messages: List<Message> = emptyList(),
         val isTyping: Boolean = false,
         val pendingAttachments: List<PendingAttachment> = emptyList(),
+        /**
+         * Which option the user tapped on each interactive prompt, keyed by
+         * the prompt message's id.
+         *
+         * In memory only, and deliberately so: the server persists neither the
+         * chosen `value` nor the gallery label on the reply row, so a restored
+         * transcript cannot say which card was picked. This record is the only
+         * thing that can — see [selectionFor], which falls back to a label
+         * match for history it never saw live.
+         */
+        val promptSelections: Map<String, PromptSelection> = emptyMap(),
     )
+
+    /**
+     * The option a user tapped on one prompt. [cardIndex] is null for a
+     * top-level button row and the card's position for a gallery pick —
+     * carried because two cards may share a button label.
+     */
+    data class PromptSelection(val cardIndex: Int?, val buttonLabel: String)
 
     private val sessionsState = MutableStateFlow<Map<String, SessionUIState>>(emptyMap())
     private val _currentSessionId = MutableStateFlow<String?>(null)
@@ -152,7 +171,13 @@ class ChatService(private val manager: SDKManager) {
      * Does not mutate [messages] directly — the SDK fires MessageAdded /
      * MessageUpdated which [handleEvent] applies.
      */
-    suspend fun sendMessage(text: String) {
+    suspend fun sendMessage(
+        text: String,
+        /** A prompt option's real match key. Null for a typed message. */
+        value: String? = null,
+        /** The card title a gallery pick came from. Null otherwise. */
+        galleryLabel: String? = null,
+    ) {
         val trimmed = text.trim()
         try {
             // Read tiles through the projection: with no session focused they
@@ -166,6 +191,8 @@ class ChatService(private val manager: SDKManager) {
             val payload = SendMessagePayload(
                 text = trimmed.ifEmpty { null },
                 attachments = completed,
+                value = value,
+                galleryLabel = galleryLabel,
             )
             val focused = _currentSessionId.value
             val id = if (focused != null) {
@@ -187,6 +214,86 @@ class ChatService(private val manager: SDKManager) {
         } catch (e: Throwable) {
             _error.tryEmit(e.message ?: "Failed to send")
         }
+    }
+
+    // MARK: - Interactive prompts
+
+    /**
+     * Answer an interactive prompt by tapping one of its options.
+     *
+     * Routed through [sendMessage] on purpose: a tap and a typed message share
+     * the optimistic buffer, the lazy session start and the delivery
+     * bookkeeping, and a second copy of that machinery would be a second place
+     * to get it wrong.
+     *
+     * [label] becomes the message `text` (what lands in the transcript, and the
+     * server's fallback match key); [value] is the real match key.
+     */
+    suspend fun sendButtonReply(
+        promptId: String,
+        cardIndex: Int?,
+        label: String,
+        value: String,
+        galleryLabel: String?,
+    ) {
+        // A prompt can only exist on a session that is already live, so the
+        // focused id is the right key.
+        _currentSessionId.value?.let { id ->
+            sessionsState.update { states ->
+                val s = states[id] ?: SessionUIState()
+                states + (id to s.copy(
+                    promptSelections = s.promptSelections +
+                        (promptId to PromptSelection(cardIndex, label)),
+                ))
+            }
+        }
+        sendMessage(text = label, value = value, galleryLabel = galleryLabel)
+    }
+
+    /**
+     * Which option is highlighted on [promptId], if any.
+     *
+     * Two mechanisms, because neither covers the other's case. The in-memory
+     * record is exact but empty after a relaunch; the label match works on a
+     * restored transcript but can only compare captions — so on a prompt with
+     * duplicate labels across cards it may highlight the wrong card. The server
+     * persists nothing that could disambiguate it, so that over-match is
+     * accepted rather than solved.
+     */
+    fun selectionFor(promptId: String): PromptSelection? {
+        val id = _currentSessionId.value ?: return null
+        val state = sessionsState.value[id] ?: return null
+        state.promptSelections[promptId]?.let { return it }
+
+        // Restored history: the visitor's reply is the row after the prompt,
+        // and its text is the label they tapped.
+        val promptIndex = state.messages.indexOfFirst { it.id == promptId }
+        if (promptIndex < 0) return null
+        val reply = state.messages
+            .drop(promptIndex + 1)
+            .firstOrNull { it.role == MessageRole.EXTERNAL }
+        val text = reply?.text?.takeIf { it.isNotEmpty() } ?: return null
+        return PromptSelection(cardIndex = null, buttonLabel = text)
+    }
+
+    /**
+     * Whether [message]'s options are still answerable.
+     *
+     * Deliberately NOT "any later message": the server puts lifecycle rows
+     * (`queued`/`joined`/`ended`) and paced flow messages on the visitor
+     * stream, so an agent joining mid-prompt would disable a prompt the server
+     * still considers open. The discriminator is a later **visitor-authored**
+     * row, which can only come from this client's own send or from a restored
+     * transcript.
+     */
+    fun promptIsLive(message: Message): Boolean {
+        val id = _currentSessionId.value ?: return false
+        val state = sessionsState.value[id] ?: return false
+        val promptIndex = state.messages.indexOfFirst { it.id == message.id }
+        if (promptIndex < 0) return false
+        return state.messages
+            .drop(promptIndex + 1)
+            .none { it.role == MessageRole.EXTERNAL }
     }
 
     /** Notify the peer the user is typing. Cheap to call; SDK debounces. */

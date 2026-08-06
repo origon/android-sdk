@@ -2,8 +2,11 @@ package origon.example.android.ui.components
 
 import ai.origon.sdk.Attachment
 import ai.origon.sdk.Message
+import ai.origon.sdk.MessageButton
 import ai.origon.sdk.MessageRole
 import ai.origon.sdk.MessageStatus
+import android.content.Intent
+import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -41,6 +44,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,8 +52,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import coil3.compose.AsyncImage
 import origon.example.android.R
+import origon.example.android.services.ChatService
 import origon.example.android.ui.theme.EaseInOut
 import origon.example.android.ui.theme.OrigonTheme
 import java.time.OffsetDateTime
@@ -84,6 +90,12 @@ fun MessageBubble(
     onAttachmentTap: (Int) -> Unit,
     onDownloadAttachment: (Attachment) -> Unit,
     modifier: Modifier = Modifier,
+    /** Whether this message's prompt options are still answerable. */
+    promptIsLive: Boolean = false,
+    /** Which option was picked on this prompt, if any. */
+    promptSelection: ChatService.PromptSelection? = null,
+    /** `(cardIndex, label, value, galleryLabel)`. Null disables prompts. */
+    onPromptReply: ((Int?, String, String, String?) -> Unit)? = null,
 ) {
     val action = message.action
     if (!action.isNullOrEmpty()) {
@@ -95,6 +107,9 @@ fun MessageBubble(
             onToggleRevealed = onToggleRevealed,
             onAttachmentTap = onAttachmentTap,
             onDownloadAttachment = onDownloadAttachment,
+            promptIsLive = promptIsLive,
+            promptSelection = promptSelection,
+            onPromptReply = onPromptReply,
             modifier = modifier,
         )
     }
@@ -138,8 +153,12 @@ private fun BubbleBody(
     onToggleRevealed: () -> Unit,
     onAttachmentTap: (Int) -> Unit,
     onDownloadAttachment: (Attachment) -> Unit,
+    promptIsLive: Boolean,
+    promptSelection: ChatService.PromptSelection?,
+    onPromptReply: ((Int?, String, String, String?) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val isSelfUser = message.role == MessageRole.EXTERNAL
     val text = message.text
     val hasText = !text.isNullOrEmpty()
@@ -200,6 +219,51 @@ private fun BubbleBody(
                         top = if (index == 0 && !hasText) 0.dp else 6.dp,
                     ),
                 )
+            }
+
+            // Interactive prompt options, below the text bubble. A prompt rides
+            // `role: SYSTEM` with NO action, so it reached us on the bubble
+            // branch above — which is what makes "under the text" the right
+            // place rather than an assumption.
+            if (onPromptReply != null) {
+                val handleTap: (Int?, String?, MessageButton) -> Unit =
+                    { cardIndex, galleryLabel, button ->
+                        // A `"url"` option opens the link **and** posts the
+                        // reply, matching the web client: the flow still has to
+                        // walk that option's edge, otherwise tapping a link
+                        // would strand the conversation on a waiter that never
+                        // resolves.
+                        if (button.buttonType == "url" && button.value.isNotEmpty()) {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, button.value.toUri()),
+                                )
+                            }.onFailure { Log.w(TAG, "couldn't open ${button.value}: $it") }
+                        }
+                        onPromptReply(cardIndex, button.label, button.value, galleryLabel)
+                    }
+
+                if (message.buttons.isNotEmpty()) {
+                    MessageButtons(
+                        buttons = message.buttons,
+                        isLive = promptIsLive,
+                        selectedLabel = promptSelection?.buttonLabel,
+                        onTap = { button -> handleTap(null, null, button) },
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+
+                if (message.gallery.isNotEmpty()) {
+                    MessageGallery(
+                        cards = message.gallery,
+                        isLive = promptIsLive,
+                        selection = promptSelection,
+                        onTap = { cardIndex, card, button ->
+                            handleTap(cardIndex, card.title, button)
+                        },
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
             }
 
             if (message.status == MessageStatus.FAILED) {
@@ -405,6 +469,8 @@ internal fun formatTimestamp(iso: String, zone: ZoneId = ZoneId.systemDefault())
 }
 
 private const val REVEAL_MS = 200
+
+private const val TAG = "MessageBubble"
 
 // ── Preview matrix (roles × states × attachments) ────────────────────────
 
