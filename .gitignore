@@ -1,6 +1,5 @@
 *.iml
 .gradle/
-/gradle/
 /local.properties
 /.idea/
 .DS_Store
@@ -19,8 +18,11 @@
 # own docs: "To make the Wrapper files available to other developers and
 # execution environments, you need to check them into version control …
 # Adding the JAR file to version control is expected."
-# `**/` so it covers examples/ too. Regenerate only via
+# `**/` so it covers BOTH builds — the root and examples/. Regenerate only via
 # `gradle wrapper --gradle-version X`; never merge an external wrapper diff.
+# Do NOT re-add a `/gradle/` line above: git cannot un-ignore a file beneath an
+# ignored DIRECTORY, so that line would silently defeat this negation for the
+# root wrapper and make `./gradlew` unrunnable from a fresh clone again.
 !**/gradle/wrapper/gradle-wrapper.jar
 *.log
 /sdk/build/
