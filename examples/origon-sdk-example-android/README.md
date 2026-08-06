@@ -68,7 +68,7 @@ The SDK is consumed from Maven Central with no authentication:
 mavenCentral()
 
 // app/build.gradle.kts
-implementation("ai.origon:sdk:0.1.0")
+implementation("ai.origon:sdk:0.2.0")
 ```
 
 Bump the version string in `app/build.gradle.kts` to test a newer release.
