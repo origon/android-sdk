@@ -17,6 +17,7 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -41,15 +42,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -61,10 +58,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -72,8 +70,24 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import ai.origon.sdk.Channel
+import ai.origon.sdk.SessionSummary
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.systemGestureExclusion
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.util.lerp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -93,6 +107,7 @@ import origon.example.android.ui.components.rememberAttachmentDownloader
 import origon.example.android.ui.components.rememberToastState
 import origon.example.android.ui.theme.EaseInOut
 import origon.example.android.ui.theme.OrigonTheme
+import kotlin.math.roundToInt
 
 /**
  * The chat surface: a navigation drawer (the session list) over the transcript
@@ -158,34 +173,51 @@ private sealed interface BootState {
     data object Ready : BootState
 }
 
-/** The mark breathing while the SDK connects. */
+/**
+ * The mark, breathing, while the SDK comes up — the shipped app's
+ * `BreathingLogo`, spelled the same so the two splashes are the same splash.
+ */
 @Composable
 private fun BootingLogo() {
-    val transition = rememberInfiniteTransition(label = "boot")
-    val pulse by transition.animateFloat(
-        initialValue = 0f,
+    val transition = rememberInfiniteTransition(label = "breathing")
+    val spec = infiniteRepeatable<Float>(
+        animation = tween(BREATH_MS, easing = EaseInOut),
+        repeatMode = RepeatMode.Reverse,
+    )
+    val scale by transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.14f,
+        animationSpec = spec,
+        label = "breathingScale",
+    )
+    val opacity by transition.animateFloat(
+        initialValue = 0.5f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            tween(800, easing = EaseInOut),
-            RepeatMode.Reverse,
-        ),
-        label = "bootPulse",
+        animationSpec = spec,
+        label = "breathingOpacity",
     )
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Image(
             painter = painterResource(R.drawable.ic_origon_logo),
             contentDescription = null,
             modifier = Modifier
-                .graphicsLayer {
-                    val scale = lerp(1f, 1.14f, pulse)
-                    scaleX = scale
-                    scaleY = scale
-                    alpha = lerp(0.5f, 1f, pulse)
-                }
-                .size(72.dp),
+                // Lifted off centre so the mark sits where the eye expects a
+                // splash rather than in the geometric middle.
+                .padding(bottom = 76.dp)
+                // 56, not 72. Anchored to the SCREEN, not the safe area: from
+                // API 31 the system draws its own splash first and centres that
+                // icon on the screen, so a safe-area-relative mark lands
+                // somewhere different per navigation mode and the handover
+                // visibly jumps.
+                .size(56.dp)
+                .scale(scale)
+                .alpha(opacity),
         )
     }
 }
+
+/** The shipped app's 1.6 s autoreversing ease. */
+private const val BREATH_MS = 1600
 
 @Composable
 private fun BootError(message: String, onRetry: () -> Unit, onChangeEndpoint: () -> Unit) {
@@ -240,7 +272,8 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val focusManager = LocalFocusManager.current
+    val drawerPx = with(LocalDensity.current) { DRAWER_WIDTH.toPx() }
     val toast = rememberToastState()
     val downloader = rememberAttachmentDownloader { error -> toast.show(error ?: "Saved") }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -250,6 +283,67 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     var revealedKey by remember { mutableStateOf<String?>(null) }
     var callActive by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf<PreviewRequest?>(null) }
+
+    /**
+     * The row the sidebar picked, kept whole rather than as an id: the voice
+     * detail renders entirely from the summary, so throwing it away here would
+     * mean fetching it back.
+     */
+    var selectedSession by remember { mutableStateOf<SessionSummary?>(null) }
+
+    // ── Drawer ───────────────────────────────────────────────────────────
+    //
+    // Push-and-peek, not an overlay: the content slides right by the drawer's
+    // width so the history button peeks out from behind a dim, exactly as the
+    // shipped app does. Material's `ModalNavigationDrawer` cannot express that
+    // — it draws over the content — which is why this is hand-rolled.
+    //
+    // **The geometry is a settled value PLUS a live drag offset, and that split
+    // is load-bearing.** Folding both into one `Animatable` and pushing every
+    // drag delta through `snapTo` looks equivalent and is not: each launched
+    // `snapTo` cancels the one before it, so a fast drag's last deltas are
+    // dropped, the release reads a stale position, and the drawer simply does
+    // not open. A drag is synchronous and an animation is not, so they are two
+    // things and are stored as two.
+
+    /** Where the drawer rests: 0 = closed, 1 = fully open. Animated. */
+    val settled = remember { Animatable(0f) }
+
+    /** What the finger has added since the drag began. Written synchronously. */
+    var dragProgress by remember { mutableFloatStateOf(0f) }
+
+    /** Changes once per gesture, not once per frame — hit-testing reads it. */
+    var isOpen by remember { mutableStateOf(false) }
+
+    val shown = { (settled.value + dragProgress).coerceIn(0f, 1f) }
+
+    /**
+     * Come to rest open or closed. The live drag is folded into [settled] first
+     * and in this same coroutine, so the spring starts from where the finger
+     * actually left the drawer rather than from wherever it rested before.
+     */
+    suspend fun settle(open: Boolean) {
+        // Here rather than at the button, so the edge swipe is covered too: the
+        // composer takes focus whenever a session resolves, and this layer sits
+        // outside its `safeDrawing` padding — so an IME left up would cover the
+        // bottom of the session list, including the taps meant for it.
+        if (open) focusManager.clearFocus()
+        isOpen = open
+        settled.snapTo(shown())
+        dragProgress = 0f
+        settled.animateTo(if (open) 1f else 0f, DRAWER_SPRING)
+    }
+
+    /** Take the drawer off any running animation so the finger owns it. */
+    fun beginDrag() {
+        scope.launch { settled.stop() }
+    }
+
+    /** Synchronous, on the gesture's own thread. */
+    fun drag(delta: Float) {
+        dragProgress = (dragProgress + delta / drawerPx)
+            .coerceIn(-settled.value, 1f - settled.value)
+    }
 
     LaunchedEffect(Unit) { chat.error.collect { toast.show(it) } }
 
@@ -321,107 +415,224 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
         Unit
     }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            ModalDrawerSheet(
-                drawerContainerColor = OrigonTheme.colors.screenBackground,
-                drawerContentColor = OrigonTheme.colors.textPrimary,
+    Box(Modifier.fillMaxSize()) {
+        // Bottom layer — the root content, pushed right by the drawer.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                // The lambda form: read in the layout phase, so an animating
+                // drawer relayouts without recomposing this subtree.
+                .offset { IntOffset((drawerPx * shown()).roundToInt(), 0) }
+                // Opaque, or the drawer sitting underneath in the stack shows
+                // through the content it is supposed to be behind.
+                .background(OrigonTheme.colors.screenBackground),
+        ) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    // `safeDrawing`, not `statusBarsPadding()
+                    // .navigationBarsPadding().imePadding()` — that chain ADDS
+                    // the navigation-bar inset to the IME inset while the
+                    // keyboard is up, lifting the composer a nav-bar's height
+                    // above the keyboard. safeDrawing is the union of system
+                    // bars, the IME and the display cutout.
+                    .windowInsetsPadding(WindowInsets.safeDrawing),
             ) {
-                Sidebar(
-                    sessions = sessions,
-                    selectedSessionId = currentSessionId,
-                    onSessionPicked = { session ->
-                        scope.launch {
-                            drawerState.close()
-                            chat.openSession(session.sessionId)
-                        }
-                    },
-                    onChangeEndpoint = {
-                        scope.launch {
-                            drawerState.close()
-                            onChangeEndpoint()
-                        }
+                val voice = selectedSession?.takeIf { it.channel == Channel.VOICE }
+
+                SessionHeader(
+                    onMenuTap = { scope.launch { settle(open = true) } },
+                    // A voice session gets the same header the transcript wears,
+                    // titled. Rendering a bare title would strand the user with
+                    // no menu button, and the edge swipe cannot stand in — the
+                    // system owns that gesture outside the bottom band.
+                    title = if (voice != null) "Voice call" else null,
+                    // Only offer "new session" once there is something to leave:
+                    // a conversation with content, or a voice row being viewed.
+                    showPlus = voice != null || messages.isNotEmpty(),
+                    onNewSession = {
+                        chat.endCurrentSession()
+                        selectedSession = null
                     },
                 )
-            }
-        },
-    ) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .background(OrigonTheme.colors.screenBackground)
-                // `safeDrawing`, not `statusBarsPadding().navigationBarsPadding()
-                // .imePadding()` — that chain ADDS the navigation-bar inset to
-                // the IME inset while the keyboard is up, lifting the composer
-                // a nav-bar's height above the keyboard. safeDrawing is the
-                // union of system bars, the IME and the display cutout, which
-                // is the one correct answer in both states.
-                .windowInsetsPadding(WindowInsets.safeDrawing),
-        ) {
-            SessionHeader(
-                onMenuTap = { scope.launch { drawerState.open() } },
-                // Only offer "new session" once the conversation has content —
-                // on an empty session it is a no-op.
-                showPlus = messages.isNotEmpty(),
-                onNewSession = { chat.endCurrentSession() },
-            )
 
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (messages.isEmpty() && !isTyping) {
-                    EmptyTranscript()
+                if (voice != null) {
+                    // A voice row is a different VIEW OF THE ROOT, not a place
+                    // to navigate to — so it fills the content slot in place.
+                    // The drawer still swipes open over it, and a voice tap can
+                    // no longer fall through to the chat view and render an
+                    // empty transcript with a composer under it.
+                    VoiceSessionDetail(selectedSession!!)
                 } else {
-                    Transcript(
-                        messages = messages,
-                        isTyping = isTyping,
-                        revealedKey = revealedKey,
-                        onToggleRevealed = { key ->
-                            revealedKey = if (revealedKey == key) null else key
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        if (messages.isEmpty() && !isTyping) {
+                            EmptyTranscript()
+                        } else {
+                            Transcript(
+                                messages = messages,
+                                isTyping = isTyping,
+                                revealedKey = revealedKey,
+                                onToggleRevealed = { key ->
+                                    revealedKey = if (revealedKey == key) null else key
+                                },
+                                onAttachmentTap = { message, index ->
+                                    preview = PreviewRequest(message.attachments, index)
+                                },
+                                onDownloadAttachment = downloader::download,
+                                promptIsLive = chat::promptIsLive,
+                                promptSelection = chat::selectionFor,
+                                onPromptReply = { promptId, cardIndex, label, value, galleryLabel ->
+                                    scope.launch {
+                                        chat.sendButtonReply(
+                                            promptId = promptId,
+                                            cardIndex = cardIndex,
+                                            label = label,
+                                            value = value,
+                                            galleryLabel = galleryLabel,
+                                        )
+                                    }
+                                },
+                            )
+                        }
+                    }
+
+                    Composer(
+                        draft = draft,
+                        onDraftChange = { value ->
+                            draft = value
+                            if (value.isBlank()) chat.stopTyping() else chat.notifyTyping()
                         },
-                        onAttachmentTap = { message, index ->
-                            preview = PreviewRequest(message.attachments, index)
-                        },
-                        onDownloadAttachment = downloader::download,
-                        promptIsLive = chat::promptIsLive,
-                        promptSelection = chat::selectionFor,
-                        onPromptReply = { promptId, cardIndex, label, value, galleryLabel ->
-                            scope.launch {
-                                chat.sendButtonReply(
-                                    promptId = promptId,
-                                    cardIndex = cardIndex,
-                                    label = label,
-                                    value = value,
-                                    galleryLabel = galleryLabel,
+                        pending = pending,
+                        onRemovePending = chat::removePendingAttachment,
+                        sending = sending,
+                        hasContent = hasContent,
+                        onAttach = { kind ->
+                            keyboard?.hide()
+                            when (kind) {
+                                AttachKind.MEDIA -> pickMedia.launch(
+                                    PickVisualMediaRequest(
+                                        ActivityResultContracts.PickVisualMedia.ImageAndVideo,
+                                    ),
                                 )
+                                AttachKind.FILE -> pickFile.launch(arrayOf("*/*"))
                             }
                         },
+                        onSend = send,
+                        onStartCall = startCall,
                     )
                 }
             }
+        }
 
-            Composer(
-                draft = draft,
-                onDraftChange = { value ->
-                    draft = value
-                    if (value.isBlank()) chat.stopTyping() else chat.notifyTyping()
-                },
-                pending = pending,
-                onRemovePending = chat::removePendingAttachment,
-                sending = sending,
-                hasContent = hasContent,
-                onAttach = { kind ->
-                    keyboard?.hide()
-                    when (kind) {
-                        AttachKind.MEDIA -> pickMedia.launch(
-                            PickVisualMediaRequest(
-                                ActivityResultContracts.PickVisualMedia.ImageAndVideo,
-                            ),
-                        )
-                        AttachKind.FILE -> pickFile.launch(arrayOf("*/*"))
+        // Middle layer — the dim. Above the content so it darkens the peek,
+        // below the drawer so the drawer keeps full contrast. `drawBehind` for
+        // the same reason `offset` takes a lambda: it is a draw-phase read.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .drawBehind { drawRect(Color.Black, alpha = DIM_ALPHA * shown()) }
+                .then(
+                    // Only intercepts once the drawer has settled open. During
+                    // an edge drag the gesture belongs to the strip below.
+                    if (!isOpen) {
+                        Modifier
+                    } else {
+                        Modifier
+                            .pointerInput(Unit) {
+                                detectTapGestures { scope.launch { settle(open = false) } }
+                            }
+                            .pointerInput(drawerPx) {
+                                val tracker = VelocityTracker()
+                                detectHorizontalDragGestures(
+                                    onDragStart = {
+                                        tracker.resetTracking()
+                                        beginDrag()
+                                    },
+                                    onDragEnd = {
+                                        val vx = tracker.calculateVelocity().x
+                                        scope.launch {
+                                            settle(shouldOpen(shown(), vx, drawerPx))
+                                        }
+                                    },
+                                    // Without this a cancelled drag runs neither
+                                    // arm and strands the drawer part-open with
+                                    // no animation pending.
+                                    onDragCancel = { scope.launch { settle(open = true) } },
+                                ) { change, delta ->
+                                    tracker.addPosition(change.uptimeMillis, change.position)
+                                    drag(delta)
+                                }
+                            }
+                    },
+                ),
+        )
+
+        // Top layer — the drawer itself.
+        Box(
+            modifier = Modifier
+                .width(DRAWER_WIDTH)
+                .fillMaxHeight()
+                .offset { IntOffset((-drawerPx * (1f - shown())).roundToInt(), 0) }
+                // Without a background the peeking content reads through the
+                // drawer...
+                .background(OrigonTheme.colors.screenBackground)
+                // ...and `background` alone is not enough: Compose's is a
+                // DRAW-phase modifier and does not hit-test. Without an absorber
+                // a tap or drag on the drawer's blank area falls through to the
+                // dim beneath and closes the drawer the user just touched.
+                .absorbPointers(),
+        ) {
+            Sidebar(
+                sessions = sessions,
+                selectedSessionId = selectedSession?.sessionId ?: currentSessionId,
+                onSessionPicked = { session ->
+                    selectedSession = session
+                    scope.launch {
+                        settle(open = false)
+                        // Only a chat row opens a session; a voice row is
+                        // read-only history and opening it would attach a
+                        // participant to a finished call.
+                        if (session.channel != Channel.VOICE) {
+                            chat.openSession(session.sessionId)
+                        }
                     }
                 },
-                onSend = send,
-                onStartCall = startCall,
+                onChangeEndpoint = {
+                    scope.launch {
+                        settle(open = false)
+                        onChangeEndpoint()
+                    }
+                },
+            )
+        }
+
+        // The strip an opening swipe must start in, at the bottom-left. Bounded
+        // to the band the platform will actually yield to an app — a larger
+        // request is silently clamped, not honoured.
+        if (!isOpen) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .width(EDGE_WIDTH)
+                    .height(EDGE_BAND)
+                    .systemGestureExclusion()
+                    .pointerInput(drawerPx) {
+                        val tracker = VelocityTracker()
+                        detectHorizontalDragGestures(
+                            onDragStart = {
+                                tracker.resetTracking()
+                                beginDrag()
+                            },
+                            onDragEnd = {
+                                val vx = tracker.calculateVelocity().x
+                                scope.launch { settle(shouldOpen(shown(), vx, drawerPx)) }
+                            },
+                            onDragCancel = { scope.launch { settle(open = false) } },
+                        ) { change, delta ->
+                            tracker.addPosition(change.uptimeMillis, change.position)
+                            drag(delta)
+                        }
+                    },
             )
         }
     }
@@ -442,9 +653,7 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
 
     // Back closes the drawer before it leaves the screen. The call and preview
     // overlays take the gesture themselves while they are up.
-    BackHandler(enabled = drawerState.isOpen) {
-        scope.launch { drawerState.close() }
-    }
+    BackHandler(enabled = isOpen) { scope.launch { settle(open = false) } }
 
     // 96dp so the pill clears the composer.
     ToastHost(toast, bottomPadding = 96.dp)
@@ -788,4 +997,69 @@ private fun android.content.Context.queryFileInfo(uri: Uri): Pair<String, String
         }
     }
     return name to type
+}
+
+// ── Drawer geometry ──────────────────────────────────────────────────────
+//
+// These are the shipped app's numbers, carried over rather than re-picked: a
+// drawer that opens a different distance, at a different speed, off a different
+// threshold is a different control, and this example exists to be copied.
+
+/** The sidebar's width. Material's own default is ~360 and reads too wide. */
+private val DRAWER_WIDTH = 320.dp
+
+/** The strip an opening swipe must start in — UIKit's screen-edge width. */
+private val EDGE_WIDTH = 20.dp
+
+/**
+ * How much of the edge the platform will actually yield to an app. A larger
+ * request is silently clamped rather than honoured, and the value comes from an
+ * overlayable framework config, so an OEM may set it lower — re-read
+ * `adb shell dumpsys window` on a new device class rather than trusting this.
+ */
+private val EDGE_BAND = 200.dp
+
+private const val DIM_ALPHA = 0.35f
+
+/**
+ * Where a released drag settles: `translation + velocity * 0.25 > half`,
+ * expressed in progress rather than pixels.
+ *
+ * The velocity term is what makes a **flick** work. Without it a fast, short
+ * swipe — which is what an edge gesture actually is, since the finger starts at
+ * the screen edge and has little room — stops short of half and springs back,
+ * so the drawer feels like it ignores you. `detectHorizontalDragGestures` does
+ * not report velocity, hence the explicit `VelocityTracker`.
+ */
+private fun shouldOpen(progress: Float, velocityX: Float, drawerPx: Float): Boolean =
+    progress + (velocityX * DRAWER_PROJECTION_SECONDS) / drawerPx > DRAWER_THRESHOLD
+
+/** A quarter second of coasting. */
+private const val DRAWER_PROJECTION_SECONDS = 0.25f
+
+private const val DRAWER_THRESHOLD = 0.5f
+
+/**
+ * `interactiveSpring(response: 0.35, dampingFraction: 0.85)`.
+ *
+ * SwiftUI's `response` is the spring's period: `w0 = 2*PI / response`, and both
+ * frameworks define stiffness as `w0^2` for unit mass — so 0.35 s gives
+ * `(2*PI/0.35)^2` ~= 322, and `dampingFraction` is Compose's `dampingRatio`
+ * unchanged. Spelled out rather than reached for by feel.
+ */
+private val DRAWER_SPRING = spring<Float>(dampingRatio = 0.85f, stiffness = 322f)
+
+/**
+ * Swallow every pointer event that reaches this node.
+ *
+ * Compose's `background` is a draw-phase modifier and does not participate in
+ * hit testing, so a tap on a "solid" surface with nothing clickable under the
+ * finger falls straight through to whatever is behind it.
+ */
+private fun Modifier.absorbPointers(): Modifier = pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            awaitPointerEvent()
+        }
+    }
 }

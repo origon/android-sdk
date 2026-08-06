@@ -83,6 +83,18 @@ internal val PeerBubbleDark = Color(0x0FFFFFFF)
 internal val RemoteBubbleLight = Color(0xFFE5E5EA)
 internal val RemoteBubbleDark = Color(0xFF2C2C2E)
 
+/**
+ * iOS `systemGray4` — one step darker than [RemoteBubbleLight]'s `systemGray5`.
+ *
+ * Its one consumer is the voice detail's channel badge, where the separation
+ * from the avatar's `surface` beneath it is the whole point: `systemGray5`
+ * leaves barely a dozen levels between them and the badge visually merges into
+ * the disc it is supposed to sit on. Not interchangeable with the bubble grey,
+ * which is why it is its own pin rather than a reuse.
+ */
+internal val Gray4Light = Color(0xFFD1D1D6)
+internal val Gray4Dark = Color(0xFF3A3A3C)
+
 // ── Feedback ─────────────────────────────────────────────────────────────
 
 /** iOS `Color.red` (systemRed). */

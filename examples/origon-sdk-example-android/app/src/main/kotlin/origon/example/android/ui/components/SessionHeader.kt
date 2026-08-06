@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -31,6 +33,8 @@ import origon.example.android.ui.theme.OrigonTheme
 fun SessionHeader(
     onMenuTap: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Centred title. Null on the transcript, "Voice call" on the detail. */
+    title: String? = null,
     showPlus: Boolean = false,
     onNewSession: () -> Unit = {},
 ) {
@@ -47,6 +51,14 @@ fun SessionHeader(
             onClick = onMenuTap,
             modifier = Modifier.align(Alignment.CenterStart),
         )
+        if (title != null) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                color = OrigonTheme.colors.textPrimary,
+                modifier = Modifier.align(Alignment.Center),
+            )
+        }
         if (showPlus) {
             HeaderButton(
                 painterId = R.drawable.ic_plus,

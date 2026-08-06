@@ -2,7 +2,6 @@ package origon.example.android.ui.chat
 
 import ai.origon.sdk.Channel
 import ai.origon.sdk.SessionSummary
-import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,15 +20,22 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -38,9 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import origon.example.android.R
 import origon.example.android.ui.theme.OrigonTheme
-import java.time.Instant
 import java.time.LocalDate
-import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -53,7 +57,12 @@ import java.util.Locale
  * sidebar. The shipped one is structured around account surfaces this example
  * deliberately has none of — an avatar, a profile screen, an internal-user
  * picker, logout. An example authenticates by endpoint and never signs a person
- * in, so "change endpoint" is the only footer action that means anything here.
+ * in, so changing the endpoint is the only footer action that means anything.
+ *
+ * The footer follows the **iOS example**, not the shipped Android app: an
+ * overflow menu rather than a bare row, so the one destructive action is a
+ * deliberate two-tap rather than something you can brush on the way past the
+ * session list.
  */
 @Composable
 fun Sidebar(
@@ -148,7 +157,7 @@ fun Sidebar(
             }
         }
 
-        ChangeEndpointRow(onChangeEndpoint)
+        OptionsFooter(onChangeEndpoint)
     }
 }
 
@@ -209,29 +218,59 @@ private fun SessionSummary.preview(): String {
     return subject.ifEmpty { "Untitled" }
 }
 
+/**
+ * The footer overflow — iOS's `ellipsis.circle` opening a one-item menu.
+ *
+ * A menu rather than a bare "Change endpoint" row: changing the endpoint tears
+ * down the client and drops every open session, and it sits directly under a
+ * scrollable list the user is already dragging through. One deliberate tap to
+ * open, one to confirm.
+ */
 @Composable
-private fun ChangeEndpointRow(onClick: () -> Unit) {
+private fun OptionsFooter(onChangeEndpoint: () -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
-    Row(
+    var open by remember { mutableStateOf(false) }
+    Box(
         modifier = Modifier
-            .fillMaxWidth()
             .padding(horizontal = 12.dp)
-            .padding(bottom = 12.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                role = Role.Button,
-                onClick = onClick,
-            )
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(bottom = 12.dp),
     ) {
-        Text(
-            text = "Change endpoint",
-            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-            color = OrigonTheme.colors.textPrimary,
-        )
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    role = Role.Button,
+                    onClickLabel = "Options",
+                    onClick = { open = true },
+                )
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_more),
+                contentDescription = "Options",
+                // iOS `Origon.textPrimary.opacity(0.6)`.
+                tint = OrigonTheme.colors.textPrimary.copy(alpha = 0.6f),
+                modifier = Modifier.size(24.dp),
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        stringResource(R.string.sidebar_change_endpoint),
+                        // iOS marks this `role: .destructive`.
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                },
+                onClick = {
+                    open = false
+                    onChangeEndpoint()
+                },
+            )
+        }
     }
 }
 
@@ -287,32 +326,5 @@ private fun groupByDay(
     return groups
 }
 
-/**
- * `2026-08-03T11:22:33.123Z` and `2026-08-03T11:22:33Z` alike — the fractional
- * part is optional in ISO-8601 and the SDK emits both.
- * `ISO_OFFSET_DATE_TIME` accepts 0-9 fractional digits and any real offset,
- * not just `Z`.
- *
- * An unparseable timestamp drops the session from the list rather than throwing
- * — one malformed row must not blank the whole sidebar — but it is logged,
- * because silently vanishing history is the kind of thing nobody reports.
- */
-private fun parseInstant(sessionId: String, raw: String): Instant? = try {
-    OffsetDateTime.parse(raw, DateTimeFormatter.ISO_OFFSET_DATE_TIME).toInstant()
-} catch (_: java.time.format.DateTimeParseException) {
-    // The session id, not the exception class: the type is fixed by the catch
-    // so it says nothing, and a dropped row is invisible — if every row fails
-    // the sidebar asserts "no past sessions" over history it could not read.
-    Log.w(TAG, "unparseable updatedAt, session dropped from the sidebar: $sessionId")
-    null
-}
-
-/**
- * `Locale.US`, deliberately. The literal `MMM d` hardcodes English field order,
- * which would be a bug in a localized app. This example ships English only, so
- * pinning the locale is the honest form of that: it cannot pick up a non-Latin
- * numbering system from the device.
- */
 private val DAY_LABEL: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM d", Locale.US)
 
-private const val TAG = "Sidebar"
