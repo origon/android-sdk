@@ -1,22 +1,32 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+    // The Kotlin *language* plugin is deliberately absent — AGP 9.x compiles
+    // Kotlin itself (see the root build file). Only the Compose compiler
+    // plugin is applied, and its version must match the Kotlin version.
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "origon.example.android"
-    compileSdk = 35
+    // compileSdk 37 / targetSdk 36 — the pairing `apps/android` already
+    // ships. compileSdk only selects which APIs compile; targetSdk is the
+    // runtime-behaviour opt-in, and 36 is Play's floor.
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "origon.example.android"
         // Matches the SDK's minSdk (Android 6.0).
         minSdk = 23
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
     }
 
     buildFeatures {
+        // Compose is ENABLED but not yet used — the screens are still Views.
+        // Enabling it in isolation is deliberate: it proves the toolchain
+        // move on unchanged UI code before any screen migrates.
+        compose = true
         viewBinding = true
         buildConfig = true
     }
@@ -34,10 +44,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = "17"
     }
 
     sourceSets {
@@ -68,4 +74,17 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("io.coil-kt:coil:2.7.0")
+
+    // Compose — enabled now, consumed when the screens migrate. The BOM
+    // governs every compose artifact, so those carry no version of their own.
+    implementation(platform("androidx.compose:compose-bom:2026.06.01"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    debugImplementation("androidx.compose.ui:ui-tooling")
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
 }
