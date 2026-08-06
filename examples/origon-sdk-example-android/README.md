@@ -100,5 +100,11 @@ The example authenticates **by endpoint only** — it never signs a person in,
 so there is no login, profile, or account screen. It carries no test target;
 the shipped Origon apps hold the regression coverage.
 
-Interactive chat prompts (`Message.buttons` / `Message.gallery`) are not
-rendered yet on Android; the iOS example shows that surface today.
+Interactive chat prompts (`Message.buttons` / `Message.gallery`) render as
+option pills and a card carousel — see `ui/components/MessageButtons.kt` and
+`ui/components/MessageGallery.kt`. A `"url"` option opens the link **and** posts
+the reply: the flow still has to walk that edge, or the conversation strands on
+a waiter that never resolves.
+
+There are no screenshots, deliberately. A screenshot in a repo goes stale the
+moment the UI moves, and this app is meant to be read and run.
