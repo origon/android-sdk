@@ -2,24 +2,29 @@ package origon.example.android
 
 import android.content.Context
 import android.os.Bundle
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.core.content.edit
 import androidx.core.view.WindowCompat
-import androidx.fragment.app.Fragment
 import origon.example.android.data.StorageKeys
 import origon.example.android.services.SDKManager
-import origon.example.android.ui.chat.RootChatFragment
-import origon.example.android.ui.endpoint.EndpointFragment
+import origon.example.android.ui.chat.RootChatScreen
+import origon.example.android.ui.endpoint.EndpointScreen
+import origon.example.android.ui.theme.OrigonTheme
 
 /**
- * Single-Activity host. Gates between the Endpoint screen and the chat
- * surface based on the persisted endpoint, mirroring the iOS RootView:
- *   - no endpoint saved  → EndpointFragment
- *   - endpoint present    → RootChatFragment (which boots the SDK)
+ * Single-Activity host. Gates between the Endpoint screen and the chat surface
+ * on the persisted endpoint:
+ *   - no endpoint saved → [EndpointScreen]
+ *   - endpoint present   → [RootChatScreen] (which boots the SDK)
  */
-class MainActivity : AppCompatActivity(R.layout.activity_main) {
+class MainActivity : ComponentActivity() {
 
-    val sdk: SDKManager get() = (application as OrigonExampleApp).sdk
+    private val sdk: SDKManager get() = (application as OrigonExampleApp).sdk
 
     private val prefs by lazy {
         getSharedPreferences(StorageKeys.PREFS, Context.MODE_PRIVATE)
@@ -28,35 +33,40 @@ class MainActivity : AppCompatActivity(R.layout.activity_main) {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Draw edge-to-edge on every API level (Android 15 enforces this for
-        // SDK 35 targets anyway). Fragments restore safe-area spacing via
-        // `applyWindowInsets`; the theme keeps the bar icons legible.
+        // SDK 35 targets anyway). The screens restore safe-area spacing with
+        // the window-inset modifiers; the theme keeps the bar icons legible.
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        if (savedInstanceState == null) {
-            if (currentEndpoint().isNullOrEmpty()) showEndpoint() else showChat()
+
+        setContent {
+            OrigonTheme {
+                // The Activity is recreated on a configuration change, at which
+                // point this re-reads the store.
+                var endpoint by remember { mutableStateOf(currentEndpoint()) }
+
+                val saved = endpoint
+                if (saved.isNullOrEmpty()) {
+                    EndpointScreen(
+                        sdk = sdk,
+                        onAuthenticated = { url ->
+                            prefs.edit { putString(StorageKeys.ORIGON_ENDPOINT, url) }
+                            endpoint = url
+                        },
+                    )
+                } else {
+                    RootChatScreen(
+                        sdk = sdk,
+                        endpoint = saved,
+                        onChangeEndpoint = {
+                            sdk.teardown()
+                            prefs.edit { remove(StorageKeys.ORIGON_ENDPOINT) }
+                            endpoint = null
+                        },
+                    )
+                }
+            }
         }
     }
 
-    fun currentEndpoint(): String? = prefs.getString(StorageKeys.ORIGON_ENDPOINT, null)
-
-    /** Called by EndpointFragment after a successful `sdk.initialize`. */
-    fun onEndpointAuthenticated(url: String) {
-        prefs.edit { putString(StorageKeys.ORIGON_ENDPOINT, url) }
-        showChat()
-    }
-
-    /** Called from the sidebar / error state — tears down and returns to Endpoint. */
-    fun onChangeEndpoint() {
-        sdk.teardown()
-        prefs.edit { remove(StorageKeys.ORIGON_ENDPOINT) }
-        showEndpoint()
-    }
-
-    private fun showEndpoint() = swap(EndpointFragment())
-    private fun showChat() = swap(RootChatFragment())
-
-    private fun swap(fragment: Fragment) {
-        supportFragmentManager.beginTransaction()
-            .replace(R.id.fragment_container, fragment)
-            .commit()
-    }
+    private fun currentEndpoint(): String? =
+        prefs.getString(StorageKeys.ORIGON_ENDPOINT, null)
 }

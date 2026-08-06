@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <dimen name="sidebar_width">320dp</dimen>
-    <dimen name="button_height">48dp</dimen>
-    <dimen name="bubble_radius">18dp</dimen>
-    <dimen name="input_radius">24dp</dimen>
-    <dimen name="screen_margin">16dp</dimen>
-</resources>

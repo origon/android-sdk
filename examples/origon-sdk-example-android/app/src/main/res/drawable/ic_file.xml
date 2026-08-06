@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Ported from `web/chat/src/lib/assets/icons.svelte`'s `file` symbol —
+  Origon's own artwork. iOS differentiates non-image attachments across five
+  SF Symbols (`doc.richtext` / `waveform` / `play.rectangle` / `doc.zipper` /
+  `doc`); none of those port (RULES.md "SF Symbols do not port"), and the web
+  client — whose capsule layout the iOS row explicitly matches — renders every
+  non-image type with this one glyph. Android follows web.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="14dp"
+    android:height="16dp"
+    android:viewportWidth="14"
+    android:viewportHeight="16">
+    <path
+        android:pathData="M2.75,15.25 H11.25 C12.3546,15.25 13.25,14.3546 13.25,13.25 V5 L9,0.75 H2.75 C1.64543,0.75 0.75,1.64543 0.75,2.75 V13.25 C0.75,14.3546 1.64543,15.25 2.75,15.25 Z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Stands in for the SF Symbol `chevron.left` that `apps/ios/origon-ios/Views/
+  EmailSignInView.swift:65-67` renders at `.body.weight(.semibold)`. There is no
+  asset-catalog entry to port — SF Symbols are a system font, so the glyph is
+  drawn here instead.
+
+  A stroked path rather than a filled outline: the symbol IS a two-segment
+  stroke, and `Icon`'s tint is a colour filter over the rasterised result, so it
+  recolours a stroke exactly as it does a fill. 2.2 at a 24 viewport is the
+  semibold weight; round cap/join match the symbol's terminals.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M15,5 L8,12 L15,19"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

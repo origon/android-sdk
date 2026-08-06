@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Only strings the UI actually reads. The ported components carry their own
+    content descriptions inline ("Mute", "Session history", "TODAY", …), the
+    same way the shipped Origon apps do, so those have no entry here.
+-->
 <resources>
     <string name="app_name">Origon Example</string>
 
@@ -13,30 +18,17 @@
     <!-- Chat -->
     <string name="chat_empty_greeting">How can I help you?</string>
     <string name="chat_input_hint">Message</string>
-    <string name="chat_session_history">Session history</string>
-    <string name="chat_new_session">New session</string>
-    <string name="chat_disconnected">Chat disconnected</string>
 
     <!-- Attachments -->
     <string name="attach_photo_library">Photo Library</string>
-    <string name="attach_camera">Camera</string>
     <string name="attach_files">Files</string>
     <string name="attach_remove">Remove attachment</string>
 
     <!-- Sidebar -->
     <string name="sidebar_change_endpoint">Change Endpoint</string>
-    <string name="sidebar_options">Options</string>
-    <string name="sidebar_untitled">Untitled</string>
-    <string name="group_today">TODAY</string>
-    <string name="group_yesterday">YESTERDAY</string>
 
     <!-- Call -->
     <string name="call_mic_required">Microphone permission is required for voice calls</string>
-    <string name="call_mute">Mute</string>
-    <string name="call_unmute">Unmute</string>
-    <string name="call_speaker">Turn on speaker</string>
-    <string name="call_speaker_off">Turn off speaker</string>
-    <string name="call_end">End call</string>
 
     <!-- Retry / errors -->
     <string name="retry">Retry</string>
