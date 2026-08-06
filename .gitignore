@@ -14,6 +14,14 @@
 *.dex
 *.class
 *.jar
+# ...except the Gradle wrapper jar, which MUST be committed: without it
+# `./gradlew` dies with "Unable to access jarfile" on a fresh clone. Gradle's
+# own docs: "To make the Wrapper files available to other developers and
+# execution environments, you need to check them into version control …
+# Adding the JAR file to version control is expected."
+# `**/` so it covers examples/ too. Regenerate only via
+# `gradle wrapper --gradle-version X`; never merge an external wrapper diff.
+!**/gradle/wrapper/gradle-wrapper.jar
 *.log
 /sdk/build/
 /sdk/.cxx/
