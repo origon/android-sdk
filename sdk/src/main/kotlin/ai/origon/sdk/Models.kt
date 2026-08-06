@@ -318,9 +318,11 @@ data class Message(
     val userName: String? = null,
     /**
      * Lifecycle action for a `role == SYSTEM` row: `"queued"` | `"joined"`
-     * | `"left"` | `"ended"`. Set by connect on lifecycle system messages;
-     * absent on ordinary messages and on flow-bot system messages. Wire
-     * key: `action`.
+     * | `"ended"`. Set by connect on lifecycle system messages; absent on
+     * ordinary messages and on flow-bot system messages (which keep bubble
+     * rendering — the divider discriminator is action-presence, NOT role).
+     * Wire key: `action`. Connect owns the vocabulary; a distinct `"left"`
+     * was considered and dropped there.
      */
     val action: String? = null,
     val attachments: List<Attachment> = emptyList(),
