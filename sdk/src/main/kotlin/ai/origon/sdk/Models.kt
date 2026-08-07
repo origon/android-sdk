@@ -8,34 +8,24 @@ import kotlinx.serialization.json.JsonObject
 
 @Serializable
 enum class Channel {
+    // `Channel` no longer crosses the native boundary as an int: the split
+    // into startCall/startChat + joinCall/joinChat removed the runtime
+    // discriminator every signature used to carry. The enum survives only
+    // where the SERVER names a channel in a JSON payload, which
+    // `kotlinx.serialization` handles from the @SerialName values below.
     @SerialName("chat") CHAT,
     @SerialName("voice") VOICE;
 
-    internal fun toBridge(): Int = when (this) {
-        CHAT -> SessionBridge.CHANNEL_CHAT
-        VOICE -> SessionBridge.CHANNEL_VOICE
-    }
-
     internal companion object {
-        fun fromBridge(value: Int): Channel = when (value) {
-            SessionBridge.CHANNEL_CHAT -> CHAT
-            SessionBridge.CHANNEL_VOICE -> VOICE
-            else -> throw SessionException(
-                kind = SessionBridge.ERROR_OTHER,
-                statusCode = 0,
-                code = null,
-                message = "unknown channel discriminant: $value",
-            )
-        }
-
-        fun fromWire(s: String): Channel = when (s) {
-            "voice" -> VOICE
+        /** Parse the channel name the SERVER puts in a JSON payload. */
+        fun fromWire(value: String): Channel = when (value) {
             "chat" -> CHAT
+            "voice" -> VOICE
             else -> throw SessionException(
                 kind = SessionBridge.ERROR_OTHER,
                 statusCode = 0,
                 code = null,
-                message = "unknown channel: $s",
+                message = "unknown channel: $value",
             )
         }
     }
@@ -130,8 +120,28 @@ data class ClientConfig(
     val attributes: JsonObject? = null,
 )
 
-data class StartSessionOptions(
-    val channel: Channel,
+data class StartCallOptions(
+    /** Existing session id to resume; null for a new session. */
+    val sessionId: String? = null,
+    /** Optional consumer-defined raw JSON forwarded as `data` on the wire. */
+    val data: String? = null,
+)
+
+/**
+ * Options for [OrigonClient.startChat].
+ *
+ * [firstMessage] is REQUIRED, and that is the whole point of the split from
+ * the old `startSession`. The server runs a two-stage gate on every chat: the
+ * flow does not start until the visitor has actually said something, and a
+ * session that stays silent past the deadline is reaped. An API that opened a
+ * session and then waited for a human to type was racing that deadline;
+ * carrying the message here makes the race unreachable.
+ *
+ * Attachment-only is valid — the gate fires on ANY visitor content.
+ */
+data class StartChatOptions(
+    /** The visitor's first message. Required. */
+    val firstMessage: SendMessagePayload,
     /** Existing session id to resume; null for a new session. */
     val sessionId: String? = null,
     /** Optional consumer-defined raw JSON forwarded as `data` on the wire. */
@@ -145,8 +155,12 @@ data class StartSessionResponse(
     val token: String,
 )
 
-data class JoinSessionInput(
-    val channel: Channel,
+/**
+ * Input for [OrigonClient.joinCall] / [OrigonClient.joinChat] — a
+ * previously-obtained [StartSessionResponse]. No channel: the method carries
+ * it.
+ */
+data class JoinInput(
     val sessionId: String,
     val url: String,
     val token: String,
@@ -230,6 +244,53 @@ data class UploadProgress(
 )
 
 /**
+ * One option on an interactive flow prompt — [Message.buttons], or a
+ * gallery card's own button stack.
+ *
+ * The visitor answers by sending [SendMessagePayload.value] set to this
+ * option's [value]. The server matches on **[value]**, never on [label].
+ */
+@Serializable
+data class MessageButton(
+    /**
+     * The caption to render. Wire key `label` on this lane — the platform
+     * GraphQL read spells the same field `text`, so payloads from that
+     * source are not interchangeable with these.
+     */
+    val label: String = "",
+    /** The match key, sent back as [SendMessagePayload.value]. */
+    val value: String = "",
+    /**
+     * Authored kind — `"text"` / `"postback"` / `"url"`. A free string,
+     * not an enum: an unknown kind must degrade, not fail to decode.
+     *
+     * The wire key is **`type`**; without the [SerialName] it would
+     * serialize as `buttonType` and decode to empty, silently turning
+     * every URL button into a plain postback.
+     */
+    @SerialName("type") val buttonType: String = "",
+)
+
+/** One card in a [Message.gallery] carousel. */
+@Serializable
+data class MessageCard(
+    /**
+     * Card heading. Doubles as the gallery match key — a reply sends it
+     * as [SendMessagePayload.galleryLabel].
+     */
+    val title: String = "",
+    val description: String = "",
+    /**
+     * **Nullable, and legitimately so** — the server emits `null` for a
+     * card authored without an image. A card with no image is valid, not
+     * malformed; guard before rendering.
+     */
+    val image: Attachment? = null,
+    /** This card's own options, same shape as the top-level array. */
+    val buttons: List<MessageButton> = emptyList(),
+)
+
+/**
  * One transcript line / message. Mirrors the Rust `Message` shape.
  *
  * For outbound sends the SDK fires `MessageAdded` with a provisional
@@ -255,7 +316,28 @@ data class Message(
     val timestamp: String? = null,
     val userId: String? = null,
     val userName: String? = null,
+    /**
+     * Lifecycle action for a `role == SYSTEM` row: `"queued"` | `"joined"`
+     * | `"ended"`. Set by connect on lifecycle system messages; absent on
+     * ordinary messages and on flow-bot system messages (which keep bubble
+     * rendering — the divider discriminator is action-presence, NOT role).
+     * Wire key: `action`. Connect owns the vocabulary; a distinct `"left"`
+     * was considered and dropped there.
+     */
+    val action: String? = null,
     val attachments: List<Attachment> = emptyList(),
+    /**
+     * Interactive prompt options on a flow-authored `role == SYSTEM` row.
+     * Empty on every ordinary message — a non-empty list is what makes
+     * this message a prompt. Note a prompt carries NO [action], so it
+     * renders as a bubble, not a lifecycle divider.
+     */
+    val buttons: List<MessageButton> = emptyList(),
+    /**
+     * Gallery-card carousel on a flow-authored `role == SYSTEM` row — the
+     * card-shaped sibling of [buttons]. Empty on ordinary messages.
+     */
+    val gallery: List<MessageCard> = emptyList(),
     val errorText: String? = null,
     val status: MessageStatus = MessageStatus.DELIVERED,
     val state: MessageState = MessageState.COMPLETED,
@@ -267,6 +349,23 @@ data class SendMessagePayload(
     val text: String? = null,
     val html: String? = null,
     val attachments: List<Attachment> = emptyList(),
+    /**
+     * The chosen [MessageButton.value] when this send answers an
+     * interactive prompt. The server matches a button on this, falling
+     * back to [text] — so [text] must ALSO be set (to the option's
+     * label): a body with no text/html/attachments is refused with a 400
+     * before the flow ever sees it.
+     *
+     * Omitted from the wire when null (`encodeDefaults` is off).
+     */
+    val value: String? = null,
+    /**
+     * The picked [MessageCard.title] when answering a gallery prompt.
+     * The server matches a gallery pick on the PAIR
+     * `(galleryLabel, value)`, which is what disambiguates two cards
+     * sharing a button value. Leave null for a plain button reply.
+     */
+    val galleryLabel: String? = null,
 )
 
 @Serializable
@@ -297,6 +396,32 @@ data class SessionHistory(
 
 // ── Disconnect / events ──────────────────────────────────────────────
 
+/**
+ * After-Call-Work offer carried on a chat [ClientEvent.ChatSessionEnded]
+ * for an **agent** participant (the wrap-up screen). Absent for the widget
+ * / visitor side. Wire keys mirror connect's chat `sessionEnded.acw` block.
+ */
+@Serializable
+data class Acw(
+    /** Always `true` when the block is present — its presence is the signal. */
+    val enabled: Boolean = false,
+    /** Wrap-up window in seconds. `0` ⇒ open-ended server-side. */
+    val duration: Long = 0,
+    /** The agent cannot finish wrap-up without a disposition. */
+    val enforce: Boolean = false,
+    /** RFC3339 instant the agent entered ACW. Wire key: `startedAt`. */
+    val startedAt: String? = null,
+    /** The team's disposition tags — the wrap-up chips. */
+    val dispositions: List<String> = emptyList(),
+)
+
+/** Decoded shape of the `EVENT_CHAT_SESSION_ENDED` `messageJson` slot. */
+@Serializable
+internal data class ChatSessionEndedPayload(
+    val reason: String = "",
+    val acw: Acw? = null,
+)
+
 sealed class DisconnectReason {
     data object LocalClose : DisconnectReason()
     data object NetworkLoss : DisconnectReason()
@@ -310,6 +435,14 @@ sealed class DisconnectReason {
     data object IllegalState : DisconnectReason()
     data object ResourceExhausted : DisconnectReason()
     data object ReplayLost : DisconnectReason()
+
+    /**
+     * The server ended the session cleanly (`SESSION_ENDED`, 0x1040):
+     * the bridge collapsed (remote leg hung up / engine drained), the
+     * controller destroyed the session, or the engine reaped it idle.
+     * Terminal — the SDK does not reconnect; a transport close follows.
+     */
+    data object SessionEnded : DisconnectReason()
     data class ServerClosed(val code: Long, val detail: String?) : DisconnectReason()
 
     /**
@@ -334,6 +467,7 @@ sealed class DisconnectReason {
                 SessionBridge.DISCONNECT_REASON_ILLEGAL_STATE -> IllegalState
                 SessionBridge.DISCONNECT_REASON_RESOURCE_EXHAUSTED -> ResourceExhausted
                 SessionBridge.DISCONNECT_REASON_REPLAY_LOST -> ReplayLost
+                SessionBridge.DISCONNECT_REASON_SESSION_ENDED -> SessionEnded
                 SessionBridge.DISCONNECT_REASON_SERVER_CLOSED ->
                     ServerClosed(serverCode, serverDetail)
                 SessionBridge.DISCONNECT_REASON_TRANSPORT_CLOSED ->
@@ -386,6 +520,19 @@ sealed class ClientEvent {
     data class Typing(
         override val sessionId: String,
         val isTyping: Boolean,
+    ) : ClientEvent()
+
+    /**
+     * The chat session ended cleanly by an explicit server signal
+     * (connect's chat `sessionEnded` SSE frame) — distinct from a
+     * transport-level [Disconnected], which does NOT follow it. [acw]
+     * carries the agent wrap-up offer; `null` for the widget / visitor
+     * side. Android ships no chat UI today — surfaced for wire parity.
+     */
+    data class ChatSessionEnded(
+        override val sessionId: String,
+        val reason: String,
+        val acw: Acw? = null,
     ) : ClientEvent()
 
     data class Connected(override val sessionId: String) : ClientEvent()

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The voice-session detail's avatar placeholder — head + shoulders, filled.
+
+  Ported from `web/kit/src/lib/components/ui/icon/icons.svelte`'s
+  `icon-kit-person-filled` symbol, both paths unchanged. iOS draws this one
+  from the SF Symbol `person.fill`, which does not port (RULES.md); web/kit is
+  the second Origon catalog that rule points at, and it carries the
+  counterpart, so no asset had to be minted.
+
+  Both subpaths declare `fill-rule="evenodd"` at source. They do not overlap, so
+  the winding rule changes nothing here — it is carried over rather than
+  silently dropped, since re-deriving "it happens not to matter" on the next
+  edit is exactly how a glyph breaks. lint flags `fillType` as API 24+ and this
+  project's floor is 23: irrelevant, because Compose parses this XML itself via
+  `painterResource` (see ic_origon_logo for the measured precedent).
+
+  Origon artwork; template-rendered — tint at the call site.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="UnusedAttribute"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:fillType="evenOdd"
+        android:pathData="M6.5,7.5C6.5,4.46243 8.96243,2 12,2C15.0376,2 17.5,4.46243 17.5,7.5C17.5,10.5376 15.0376,13 12,13C8.96243,13 6.5,10.5376 6.5,7.5Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:fillType="evenOdd"
+        android:pathData="M3.74416,21C3.32995,21 3,20.6642 3,20.25V18.75C3,16.1266 5.12665,14 7.75,14H16.25C18.8734,14 21,16.1266 21,18.75V20.25C21,20.6642 20.67,21 20.2558,21C17.0815,21 6.91849,21 3.74416,21Z" />
+</vector>

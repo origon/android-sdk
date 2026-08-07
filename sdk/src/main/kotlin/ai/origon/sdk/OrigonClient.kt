@@ -12,7 +12,7 @@ import kotlinx.serialization.json.JsonObject
  * The primary interface to the Origon platform on Android.
  *
  * Backed by `libsession.so` via [SessionBridge]. One instance owns one
- * native handle and one tokio runtime; create at app start, call
+ * native handle and one smol executor; create at app start, call
  * [close] (or use `use { }`) at app shutdown.
  *
  * All fallible methods throw [SessionException] with a structured
@@ -137,7 +137,7 @@ class OrigonClient(
 
     /**
      * Replace session-level attributes injected as `data.attributes` on
-     * subsequent [startSession] calls. Pass null to clear.
+     * subsequent [startCall] / [startChat] calls. Pass null to clear.
      */
     fun setAttributes(attributes: JsonObject?) {
         ensureOpen()
@@ -182,25 +182,21 @@ class OrigonClient(
     // ── Session lifecycle ────────────────────────────────────────────
 
     /**
-     * Open a session and return its [StartSessionResponse]
-     * `(sessionId, url, token)`.
+     * Start a **voice call**. Posts `/session/start` and brings the media
+     * plane up.
      *
-     * **Returning does not mean the media plane is connected.** For a
-     * [Channel.VOICE] session the MoQ dial runs in the background after
-     * this returns: connect success arrives as a `ClientEvent.Connected`
-     * and a dial failure as a `ClientEvent.Disconnected` (`TransportClosed`)
-     * on the event stream — *not* as a thrown [SessionException]. Calling
-     * [endSession] with the returned id while still dialing cancels the
-     * in-flight dial. A [Channel.CHAT] session completes its (quick) SSE
-     * dial before returning and still throws on SSE-dial failure. Throws
-     * only for the `/session/start` HTTP failure, a chat SSE-dial failure,
-     * or a malformed request.
+     * **Returning does not mean the media plane is connected.** The MoQ dial
+     * runs in the background: connect success arrives as a
+     * `ClientEvent.Connected` and a dial failure as a
+     * `ClientEvent.Disconnected` (`TransportClosed`) on the event stream —
+     * *not* as a thrown [SessionException]. Calling [endSession] with the
+     * returned id while still dialing cancels the in-flight dial. Throws only
+     * for the `/session/start` HTTP failure or a malformed request.
      */
-    fun startSession(options: StartSessionOptions): StartSessionResponse {
+    fun startCall(options: StartCallOptions): StartSessionResponse {
         ensureOpen()
-        val raw = SessionBridge.startSession(
+        val raw = SessionBridge.startCall(
             handle = handle,
-            channel = options.channel.toBridge(),
             sessionId = options.sessionId,
             dataJson = options.data,
         )
@@ -212,19 +208,67 @@ class OrigonClient(
     }
 
     /**
-     * Attach to a session whose [StartSessionResponse] was obtained out
+     * Start a **chat**, sending the visitor's first message as part of the
+     * call.
+     *
+     * The first message is required — see [StartChatOptions] for why. The
+     * session id comes back BEFORE the message is sent, so the provisional
+     * `MessageAdded` event always has a session to belong to.
+     *
+     * A first message that fails to DELIVER does not throw: the session is
+     * live and the failure arrives as `MessageUpdated` with `status = FAILED`,
+     * so the user can retry. Only a TERMINAL refusal (the session is already
+     * gone) throws — returning normally would leave the app rendering a
+     * composer on a dead conversation.
+     */
+    fun startChat(options: StartChatOptions): StartSessionResponse {
+        ensureOpen()
+        val firstJson =
+            JSON.encodeToString(SendMessagePayload.serializer(), options.firstMessage)
+        val raw = SessionBridge.startChat(
+            handle = handle,
+            firstMessageJson = firstJson,
+            sessionId = options.sessionId,
+            dataJson = options.data,
+        )
+        return StartSessionResponse(
+            sessionId = raw.sessionId,
+            url = raw.url,
+            token = raw.token,
+        )
+    }
+
+    /**
+     * Attach to a **voice call** whose [StartSessionResponse] was obtained out
      * of band (multi-device handoff, deeplink, persisted session).
      *
-     * Like [startSession], a [Channel.VOICE] session dials MoQ in the
-     * background — returning here does not mean it is connected; await the
-     * `Connected` / `Disconnected` event. A [Channel.CHAT] session
-     * completes its SSE dial before returning.
+     * Like [startCall], the MoQ dial runs in the background — returning here
+     * does not mean it is connected; await the `Connected` / `Disconnected`
+     * event.
      */
-    fun joinSession(input: JoinSessionInput) {
+    fun joinCall(input: JoinInput) {
         ensureOpen()
-        SessionBridge.joinSession(
+        SessionBridge.joinCall(
             handle = handle,
-            channel = input.channel.toBridge(),
+            sessionId = input.sessionId,
+            url = input.url,
+            token = input.token,
+        )
+    }
+
+    /**
+     * Attach to an existing **chat** obtained out of band — the agent /
+     * chat-offered path. Completes the attach before returning.
+     *
+     * Takes no first message, unlike [startChat]: joining is entering a room
+     * whose first-message gate is ALREADY released — the visitor has spoken,
+     * which is why this participant is being offered the conversation — so
+     * there is no deadline left to race.
+     */
+    fun joinChat(input: JoinInput) {
+        ensureOpen()
+        SessionBridge.joinChat(
+            handle = handle,
             sessionId = input.sessionId,
             url = input.url,
             token = input.token,
@@ -300,7 +344,7 @@ class OrigonClient(
     /**
      * Chat-only — send a text / HTML message on the named session.
      *
-     * Requires an active chat session for [id] (call [startSession]
+     * Requires an active chat session for [id] (call [startChat]
      * first). The SDK fires [ClientEvent.MessageAdded] (provisional,
      * `status == SENDING`) before the wire round-trip and
      * [ClientEvent.MessageUpdated] (delivered or failed) after — both
@@ -338,10 +382,14 @@ class OrigonClient(
     // ── Attachments ──────────────────────────────────────────────────
 
     /**
-     * Upload a file from the local filesystem to the named session and
-     * return the server-issued [Attachment]. The SDK streams the body
-     * straight from disk; auto-detects MIME from a 256-byte head plus
-     * the [fileName] extension. Runs on [Dispatchers.IO].
+     * Upload a file from the local filesystem against the widget this
+     * client was created for, and return the server-issued [Attachment].
+     * The SDK streams the body straight from disk; auto-detects MIME from
+     * a 256-byte head plus the [fileName] extension. Runs on
+     * [Dispatchers.IO].
+     *
+     * There is no `sessionId` and no session prerequisite — an attachment
+     * can be the first thing a visitor sends.
      *
      * [uploadId] doubles as the cancellation key — pass it as
      * `attachmentId` to [deleteAttachment] while the upload is in
@@ -359,7 +407,6 @@ class OrigonClient(
      * for wire failures, `ERROR_CANCELLED` when cancelled.
      */
     suspend fun uploadAttachment(
-        sessionId: String,
         path: String,
         fileName: String,
         uploadId: String = UUID.randomUUID().toString(),
@@ -378,7 +425,6 @@ class OrigonClient(
         val json = withContext(Dispatchers.IO) {
             SessionBridge.uploadAttachment(
                 handle,
-                sessionId,
                 uploadId,
                 path,
                 fileName,
@@ -395,7 +441,6 @@ class OrigonClient(
      * The SDK can't open `content://` URIs directly.
      */
     suspend fun uploadAttachment(
-        sessionId: String,
         uri: android.net.Uri,
         fileName: String,
         uploadId: String = UUID.randomUUID().toString(),
@@ -418,7 +463,6 @@ class OrigonClient(
         }
         return try {
             uploadAttachment(
-                sessionId = sessionId,
                 path = tempFile.absolutePath,
                 fileName = fileName,
                 uploadId = uploadId,
@@ -434,7 +478,6 @@ class OrigonClient(
      * app's cache dir first, then delegates to the path-based overload.
      */
     suspend fun uploadAttachment(
-        sessionId: String,
         bytes: ByteArray,
         fileName: String,
         uploadId: String = UUID.randomUUID().toString(),
@@ -450,7 +493,6 @@ class OrigonClient(
         }
         return try {
             uploadAttachment(
-                sessionId = sessionId,
                 path = tempFile.absolutePath,
                 fileName = fileName,
                 uploadId = uploadId,
@@ -462,8 +504,8 @@ class OrigonClient(
     }
 
     /**
-     * Cancel an in-flight upload or delete a completed attachment on
-     * the named session.
+     * Cancel an in-flight upload or delete a completed attachment.
+     * Session-less like [uploadAttachment].
      *
      * `attachmentId` is dual-purpose: it can be either the `uploadId`
      * passed to [uploadAttachment] (cancels the in-flight upload — no
@@ -473,15 +515,15 @@ class OrigonClient(
      * server). The SDK figures it out: it checks its in-flight uploads
      * table first, then falls through to the wire call.
      *
-     * Runs on [Dispatchers.IO]. A 404 from the server surfaces as
-     * [SessionException] with `kind = SessionBridge.ERROR_HTTP` and
-     * `statusCode == 404` — safe to treat as success when your intent
-     * was "remove the draft from the UI".
+     * Runs on [Dispatchers.IO]. The server is idempotent on a missing
+     * object and answers 204, so a successful return does not prove the
+     * id existed; a 404 means the route did not match. An id that could
+     * not form a usable path is refused by the SDK before any request.
      */
-    suspend fun deleteAttachment(sessionId: String, attachmentId: String) {
+    suspend fun deleteAttachment(attachmentId: String) {
         ensureOpen()
         withContext(Dispatchers.IO) {
-            SessionBridge.deleteAttachment(handle, sessionId, attachmentId)
+            SessionBridge.deleteAttachment(handle, attachmentId)
         }
     }
 
@@ -515,6 +557,11 @@ class OrigonClient(
 
             SessionBridge.EVENT_TYPING ->
                 ClientEvent.Typing(sid, raw.typing)
+
+            SessionBridge.EVENT_CHAT_SESSION_ENDED -> {
+                val payload = decodeSessionEnded(raw.messageJson)
+                ClientEvent.ChatSessionEnded(sid, payload.reason, payload.acw)
+            }
 
             SessionBridge.EVENT_CONNECTED ->
                 ClientEvent.Connected(sid)
@@ -582,6 +629,22 @@ class OrigonClient(
             // raw JSON, which contains message content.
             android.util.Log.w("OrigonSDK", "decodeMessage: dropping event, JSON parse failed: ${e.message}")
             null
+        }
+    }
+
+    /**
+     * Decode the `messageJson` slot for [ClientEvent.ChatSessionEnded]
+     * (`{reason, acw?}`). Returns a default payload (empty reason, no acw)
+     * on any parse failure — the chat session is over regardless, so this
+     * event must still surface.
+     */
+    private fun decodeSessionEnded(json: String?): ChatSessionEndedPayload {
+        if (json.isNullOrEmpty()) return ChatSessionEndedPayload()
+        return try {
+            JSON.decodeFromString(ChatSessionEndedPayload.serializer(), json)
+        } catch (e: Throwable) {
+            android.util.Log.w("OrigonSDK", "decodeSessionEnded: parse failed, defaulting: ${e.message}")
+            ChatSessionEndedPayload()
         }
     }
 

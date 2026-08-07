@@ -10,13 +10,13 @@ for chat and voice calls. Two screens:
    starts a call (`CallService.startCall()`).
 
 This mirrors the iOS example (`apple-sdk/examples/origon-sdk-example-ios`),
-ported to Android Views + Kotlin coroutines.
+built with Jetpack Compose + Kotlin coroutines.
 
 ## Requirements
 
 - Android Studio (Koala or newer) **or** the command-line path below
-- JDK 17–21 (AGP 8.7 does not support JDK 22+)
-- Android SDK Platform 35 + build-tools 35
+- JDK 17–21
+- Android SDK Platform 37 + build-tools 37
 - A device or emulator on **API 23+** (Android 6.0).
 
 ## Getting started
@@ -31,7 +31,7 @@ sync, pick a device, and Run.
 ```bash
 brew install openjdk@21
 brew install --cask android-commandlinetools
-sdkmanager "platform-tools" "build-tools;35.0.0" "platforms;android-35"
+sdkmanager "platform-tools" "build-tools;37.0.0" "platforms;android-37"
 
 cd android-sdk/examples/origon-sdk-example-android
 ./run.sh
@@ -43,8 +43,7 @@ logcat. Flags: `--apk-only`, `--logcat`.
 
 On first launch the app shows the Endpoint screen. Enter your Origon endpoint
 URL and continue — the app stays connected to that endpoint across relaunches.
-To switch endpoints, open the sidebar (history icon) → the **⋯** options
-button → **Change Endpoint**.
+To switch endpoints, open the sidebar (history icon) → **Change endpoint**.
 
 ## Where to look in the code
 
@@ -55,9 +54,12 @@ To wire OrigonSDK into your own app, start with these files:
 | `services/SDKManager.kt` | Single entry point. Owns `OrigonClient`, drains the SDK event queue on a 50 ms loop into a `SharedFlow`, exposes `CallService` / `ChatService`. |
 | `services/ChatService.kt` | Chat state — `openSession`, `sendMessage`, attachment upload, typing, multi-session bookkeeping, all as `StateFlow`s. |
 | `services/CallService.kt` | Voice-call state machine — `startCall`, `setMute`, `endCall`, phase transitions. |
-| `ui/endpoint/EndpointFragment.kt` | Calls `sdk.initialize(endpoint)`. |
-| `ui/chat/RootChatFragment.kt` | Boots the SDK, lists sessions, hosts the chat UI + call overlay. |
-| `ui/call/CallFragment.kt` | Active-call surface (gradient, mute, end). |
+| `ui/endpoint/EndpointScreen.kt` | Calls `sdk.initialize(endpoint)`. |
+| `ui/chat/RootChatScreen.kt` | Boots the SDK, hosts the drawer, transcript, composer, and the call + attachment overlays. |
+| `ui/chat/Sidebar.kt` | Past sessions, grouped by day. |
+| `ui/call/CallView.kt` | Active-call surface (gradient, mute, speaker, end). |
+| `ui/components/MessageBubble.kt` | One transcript row. **Note the divider rule:** a lifecycle row is discriminated by the presence of `Message.action`, *not* by `role == SYSTEM` — a `role: SYSTEM` message with no action is a flow-bot prompt and stays a bubble. |
+| `ui/components/AttachmentsPreview.kt` | Full-screen image / video / audio / PDF preview with download. |
 
 ## SDK dependency
 
@@ -68,7 +70,7 @@ The SDK is consumed from Maven Central with no authentication:
 mavenCentral()
 
 // app/build.gradle.kts
-implementation("ai.origon:sdk:0.1.0")
+implementation("ai.origon:sdk:0.2.0")
 ```
 
 Bump the version string in `app/build.gradle.kts` to test a newer release.
@@ -85,13 +87,24 @@ Two extra notes for SDK consumers (both are worked around in this example):
 
 ## Permissions
 
-- **Microphone** (`RECORD_AUDIO`) — voice calls
+- **Microphone** (`RECORD_AUDIO`) — voice calls. Requested at call time; the
+  SDK only *declares* it, since it has no Activity to drive the dialog.
+- **Nearby devices** (`BLUETOOTH_CONNECT`, API 31+) — requested only when a
+  Bluetooth headset is actually connected, so most users never see the prompt.
 - **Camera** (`CAMERA`) — declared for completeness
 - **Media/storage reads** — attachment picking
 
 ## Scope notes
 
-To keep the example focused on SDK integration, a few iOS niceties are
-simplified: inbound message attachments open via an `ACTION_VIEW` intent
-rather than an in-app full-screen pager, and the sidebar lists sessions as a
-flat list rather than grouped by day.
+The example authenticates **by endpoint only** — it never signs a person in,
+so there is no login, profile, or account screen. It carries no test target;
+the shipped Origon apps hold the regression coverage.
+
+Interactive chat prompts (`Message.buttons` / `Message.gallery`) render as
+option pills and a card carousel — see `ui/components/MessageButtons.kt` and
+`ui/components/MessageGallery.kt`. A `"url"` option opens the link **and** posts
+the reply: the flow still has to walk that edge, or the conversation strands on
+a waiter that never resolves.
+
+There are no screenshots, deliberately. A screenshot in a repo goes stale the
+moment the UI moves, and this app is meant to be read and run.

@@ -77,7 +77,7 @@ In your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("ai.origon:sdk:0.1.0")
+    implementation("ai.origon:sdk:0.2.0")
 }
 ```
 
@@ -309,14 +309,15 @@ while (true) {
 
 ### Attachments
 
-Chat only. Upload a file, then attach the returned `Attachment` to your
-next message. `uploadAttachment` is a `suspend` function (call it from a
-coroutine) with overloads for a filesystem path, a `content://` `Uri`, or
-in-memory `ByteArray`:
+Upload a file, then attach the returned `Attachment` to your next
+message. **There is no `sessionId`** — attachments are scoped to the
+widget the client was created for, so an attachment can be the first
+thing a visitor sends, before any session exists. `uploadAttachment` is a
+`suspend` function (call it from a coroutine) with overloads for a
+filesystem path, a `content://` `Uri`, or in-memory `ByteArray`:
 
 ```kotlin
 val attachment = client.uploadAttachment(
-    sessionId = sessionId,
     uri = pickedUri,
     fileName = "photo.jpg",
 ) { progress ->
@@ -331,7 +332,7 @@ client.sendMessage(
 
 // Cancel an in-flight upload (pass the uploadId) or delete a completed
 // one (pass attachment.id) — the SDK works out which.
-client.deleteAttachment(sessionId = sessionId, attachmentId = attachment.id)
+client.deleteAttachment(attachmentId = attachment.id)
 ```
 
 Uploads are prechecked against the tenant's `attachmentPolicy` (type and
@@ -400,8 +401,8 @@ OrigonClient.unregisterForPushNotifications()
 | `sendMessage(id, payload)` | Chat — POST `<sessionUrl>/message`. Returns the server-issued `Message`. Fires `MessageAdded` then `MessageUpdated`. |
 | `notifyTyping(id)` | Chat — register a keystroke; SDK debounces outbound `/typing` POSTs. |
 | `stopTyping(id)` | Chat — force outbound typing state to "off" immediately. |
-| `uploadAttachment(sessionId, …)` | Chat — `suspend`; upload a file (path / `Uri` / `ByteArray` overloads) and return the server-issued `Attachment`. Reports progress via `onProgress`. |
-| `deleteAttachment(sessionId, attachmentId)` | Chat — `suspend`; cancel an in-flight upload (pass the `uploadId`) or delete a completed attachment (pass `attachment.id`). |
+| `uploadAttachment(path \| uri \| bytes, fileName, …)` | `suspend`; upload a file (path / `Uri` / `ByteArray` overloads) against the client's widget and return the server-issued `Attachment`. No session required. Reports progress via `onProgress`. |
+| `deleteAttachment(attachmentId)` | `suspend`; cancel an in-flight upload (pass the `uploadId`) or delete a completed attachment (pass `attachment.id`). No session required. |
 | `activeSessions()` | Snapshot of every active session. |
 | `getSessions()` | `GET /sessions` — list prior sessions for the configured `userId`. |
 | `getSession(id)` | `GET /session/<id>` — transcript for one session. |

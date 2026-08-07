@@ -6,16 +6,16 @@
 # Prerequisites (one-time):
 #   brew install openjdk@21
 #   brew install --cask android-commandlinetools
-#   sdkmanager "platform-tools" "build-tools;35.0.0" "platforms;android-35"
+#   sdkmanager "platform-tools" "build-tools;37.0.0" "platforms;android-37"
 #   # for --emulator: also install the emulator + an arm64 system image, e.g.
-#   sdkmanager "emulator" "system-images;android-35;google_apis;arm64-v8a"
-#   avdmanager create avd -n Origon_API35 \
-#       -k "system-images;android-35;google_apis;arm64-v8a" --device pixel_6
+#   sdkmanager "emulator" "system-images;android-36;google_apis;arm64-v8a"
+#   avdmanager create avd -n Origon_API36 \
+#       -k "system-images;android-36;google_apis;arm64-v8a" --device pixel_6
 #
 # Usage:
 #   ./run.sh                      # build + install + launch on first connected device
 #   ./run.sh --emulator           # boot first available AVD, then build/install/launch
-#   ./run.sh --emulator <name>    # boot the named AVD (e.g. Origon_API35), then run
+#   ./run.sh --emulator <name>    # boot the named AVD (e.g. Origon_API36), then run
 #   ./run.sh <name>               # shorthand for --emulator <name>
 #   ./run.sh --apk-only           # just build the APK
 #   ./run.sh --logcat             # stream logcat from an already-installed app
@@ -32,7 +32,7 @@ usage() {
 Usage:
   ./run.sh                      # build + install + launch on first connected device
   ./run.sh --emulator           # boot first available AVD, then build/install/launch
-  ./run.sh --emulator <name>    # boot the named AVD (e.g. Origon_API35), then run
+  ./run.sh --emulator <name>    # boot the named AVD (e.g. Origon_API36), then run
   ./run.sh <name>               # shorthand for --emulator <name>
   ./run.sh --apk-only           # just build the APK
   ./run.sh --logcat             # stream logcat from an already-installed app
@@ -55,7 +55,7 @@ fi
 ADB="$ANDROID_HOME/platform-tools/adb"
 EMULATOR_BIN="$ANDROID_HOME/emulator/emulator"
 
-# ── Pin a compatible JDK (AGP 8.7 needs JDK 17-21) ─────────────────────
+# ── Pin a compatible JDK (AGP needs JDK 17-21) ─────────────────────────
 jdk_major() { "$1/bin/java" -version 2>&1 | sed -nE 's/.*version "([0-9]+).*/\1/p' | head -1; }
 if [[ -z "${JAVA_HOME:-}" || "$(jdk_major "${JAVA_HOME:-/nonexistent}" 2>/dev/null || echo 99)" -gt 21 ]]; then
     for c in "/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home" \

@@ -19,9 +19,10 @@
 -keep class ai.origon.sdk.Platform { *; }
 -keep class ai.origon.sdk.Platform$* { *; }
 -keep class ai.origon.sdk.ClientConfig { *; }
--keep class ai.origon.sdk.StartSessionOptions { *; }
+-keep class ai.origon.sdk.StartCallOptions { *; }
+-keep class ai.origon.sdk.StartChatOptions { *; }
 -keep class ai.origon.sdk.StartSessionResponse { *; }
--keep class ai.origon.sdk.JoinSessionInput { *; }
+-keep class ai.origon.sdk.JoinInput { *; }
 -keep class ai.origon.sdk.ActiveSession { *; }
 -keep class ai.origon.sdk.AttachmentRule { *; }
 -keep class ai.origon.sdk.AttachmentPolicy { *; }

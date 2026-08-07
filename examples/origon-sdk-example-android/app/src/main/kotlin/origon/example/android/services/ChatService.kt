@@ -1,13 +1,13 @@
 package origon.example.android.services
 
 import android.net.Uri
-import ai.origon.sdk.Channel
 import ai.origon.sdk.ClientEvent
 import ai.origon.sdk.DisconnectReason
 import ai.origon.sdk.Message
+import ai.origon.sdk.MessageRole
 import ai.origon.sdk.SendMessagePayload
 import ai.origon.sdk.SessionException
-import ai.origon.sdk.StartSessionOptions
+import ai.origon.sdk.StartChatOptions
 import ai.origon.sdk.UploadProgress
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -39,13 +39,36 @@ class ChatService(private val manager: SDKManager) {
         val messages: List<Message> = emptyList(),
         val isTyping: Boolean = false,
         val pendingAttachments: List<PendingAttachment> = emptyList(),
+        /**
+         * Which option the user tapped on each interactive prompt, keyed by
+         * the prompt message's id.
+         *
+         * In memory only, and deliberately so: the server persists neither the
+         * chosen `value` nor the gallery label on the reply row, so a restored
+         * transcript cannot say which card was picked. This record is the only
+         * thing that can — see [selectionFor], which falls back to a label
+         * match for history it never saw live.
+         */
+        val promptSelections: Map<String, PromptSelection> = emptyMap(),
     )
+
+    /**
+     * The option a user tapped on one prompt. [cardIndex] is null for a
+     * top-level button row and the card's position for a gallery pick —
+     * carried because two cards may share a button label.
+     */
+    data class PromptSelection(val cardIndex: Int?, val buttonLabel: String)
 
     private val sessionsState = MutableStateFlow<Map<String, SessionUIState>>(emptyMap())
     private val _currentSessionId = MutableStateFlow<String?>(null)
     val currentSessionId: StateFlow<String?> = _currentSessionId
 
-    /** Pending uploads queued before any chat session exists. */
+    /**
+     * Pending uploads queued before any chat session exists. Uploads no
+     * longer wait on a session, so this list is drained by whichever comes
+     * first: [ensureChatSession] (the lazy start on the first send) or
+     * [adoptDrafts] (the user focusing an existing session).
+     */
     private val draftPending = MutableStateFlow<List<PendingAttachment>>(emptyList())
 
     /** Transient errors for the UI to toast. */
@@ -95,16 +118,20 @@ class ChatService(private val manager: SDKManager) {
         }
         if (sessionsState.value[id] != null) {
             _currentSessionId.value = id
+            adoptDrafts(id)
             return
         }
         val client = manager.client ?: return
         try {
+            // View-only open: fetch the history and render it, but do NOT
+            // call startChat — that verb exists to open a session WITH the
+            // visitor's first message, and opening one here just to read a
+            // past conversation would attach a participant and start a chat
+            // nobody has spoken in. The session goes live on the first send.
             val history = withContext(Dispatchers.IO) { client.getSession(id) }
-            val response = withContext(Dispatchers.IO) {
-                client.startSession(StartSessionOptions(channel = Channel.CHAT, sessionId = id))
-            }
-            sessionsState.update { it + (response.sessionId to SessionUIState(messages = history.history)) }
-            _currentSessionId.value = response.sessionId
+            sessionsState.update { it + (id to SessionUIState(messages = history.history)) }
+            _currentSessionId.value = id
+            adoptDrafts(id)
             runCatching { manager.getSessions() }
         } catch (e: Throwable) {
             _error.tryEmit("Failed to open session: ${e.message}")
@@ -112,16 +139,51 @@ class ChatService(private val manager: SDKManager) {
     }
 
     /**
-     * Send a text message + completed attachments on the focused session.
-     * Lazily opens a fresh chat session on the first send when there is
-     * none. Does not mutate [messages] directly — the SDK fires
-     * MessageAdded / MessageUpdated which [handleEvent] applies.
+     * Move any draft tiles onto the session being focused.
+     *
+     * The draft list holds rows picked while nothing was open. Uploads no
+     * longer wait on a session, so nothing drains that list on its own any
+     * more — and the [pendingAttachments] projection stops reading it the
+     * moment a real session is focused. Left alone, a tile picked before
+     * opening a conversation would vanish from the composer (unremovable,
+     * its blob stranded on the server) and then silently reappear on
+     * whichever session happened to be started next.
      */
-    suspend fun sendMessage(text: String) {
+    private fun adoptDrafts(id: String) {
+        val drafts = draftPending.value
+        if (drafts.isEmpty()) return
+        sessionsState.update { states ->
+            val s = states[id] ?: return@update states
+            states + (id to s.copy(pendingAttachments = s.pendingAttachments + drafts))
+        }
+        draftPending.value = emptyList()
+    }
+
+    /**
+     * Send a text message + completed attachments.
+     *
+     * With a session already focused this is a plain `sendMessage`. With
+     * none, the send IS the open: `startChat` carries the visitor's first
+     * message, so there is no window where a session exists but has said
+     * nothing (the server gates the flow on visitor content and reaps a
+     * silent session — see [StartChatOptions]).
+     *
+     * Does not mutate [messages] directly — the SDK fires MessageAdded /
+     * MessageUpdated which [handleEvent] applies.
+     */
+    suspend fun sendMessage(
+        text: String,
+        /** A prompt option's real match key. Null for a typed message. */
+        value: String? = null,
+        /** The card title a gallery pick came from. Null otherwise. */
+        galleryLabel: String? = null,
+    ) {
         val trimmed = text.trim()
         try {
-            val id = ensureChatSession()
-            val completed = (sessionsState.value[id]?.pendingAttachments ?: emptyList())
+            // Read tiles through the projection: with no session focused they
+            // are still on the draft list, and an attachment-only first
+            // message is valid.
+            val completed = pendingAttachments.value
                 .mapNotNull { if (it.status == PendingAttachment.Status.COMPLETED) it.attachment else null }
             if (trimmed.isEmpty() && completed.isEmpty()) return
             val client = manager.client ?: return
@@ -129,8 +191,16 @@ class ChatService(private val manager: SDKManager) {
             val payload = SendMessagePayload(
                 text = trimmed.ifEmpty { null },
                 attachments = completed,
+                value = value,
+                galleryLabel = galleryLabel,
             )
-            withContext(Dispatchers.IO) { client.sendMessage(id, payload) }
+            val focused = _currentSessionId.value
+            val id = if (focused != null) {
+                withContext(Dispatchers.IO) { client.sendMessage(focused, payload) }
+                focused
+            } else {
+                openAndSend(payload)
+            }
 
             // Completed attachments now belong to the sent message.
             sessionsState.update { states ->
@@ -144,6 +214,86 @@ class ChatService(private val manager: SDKManager) {
         } catch (e: Throwable) {
             _error.tryEmit(e.message ?: "Failed to send")
         }
+    }
+
+    // MARK: - Interactive prompts
+
+    /**
+     * Answer an interactive prompt by tapping one of its options.
+     *
+     * Routed through [sendMessage] on purpose: a tap and a typed message share
+     * the optimistic buffer, the lazy session start and the delivery
+     * bookkeeping, and a second copy of that machinery would be a second place
+     * to get it wrong.
+     *
+     * [label] becomes the message `text` (what lands in the transcript, and the
+     * server's fallback match key); [value] is the real match key.
+     */
+    suspend fun sendButtonReply(
+        promptId: String,
+        cardIndex: Int?,
+        label: String,
+        value: String,
+        galleryLabel: String?,
+    ) {
+        // A prompt can only exist on a session that is already live, so the
+        // focused id is the right key.
+        _currentSessionId.value?.let { id ->
+            sessionsState.update { states ->
+                val s = states[id] ?: SessionUIState()
+                states + (id to s.copy(
+                    promptSelections = s.promptSelections +
+                        (promptId to PromptSelection(cardIndex, label)),
+                ))
+            }
+        }
+        sendMessage(text = label, value = value, galleryLabel = galleryLabel)
+    }
+
+    /**
+     * Which option is highlighted on [promptId], if any.
+     *
+     * Two mechanisms, because neither covers the other's case. The in-memory
+     * record is exact but empty after a relaunch; the label match works on a
+     * restored transcript but can only compare captions — so on a prompt with
+     * duplicate labels across cards it may highlight the wrong card. The server
+     * persists nothing that could disambiguate it, so that over-match is
+     * accepted rather than solved.
+     */
+    fun selectionFor(promptId: String): PromptSelection? {
+        val id = _currentSessionId.value ?: return null
+        val state = sessionsState.value[id] ?: return null
+        state.promptSelections[promptId]?.let { return it }
+
+        // Restored history: the visitor's reply is the row after the prompt,
+        // and its text is the label they tapped.
+        val promptIndex = state.messages.indexOfFirst { it.id == promptId }
+        if (promptIndex < 0) return null
+        val reply = state.messages
+            .drop(promptIndex + 1)
+            .firstOrNull { it.role == MessageRole.EXTERNAL }
+        val text = reply?.text?.takeIf { it.isNotEmpty() } ?: return null
+        return PromptSelection(cardIndex = null, buttonLabel = text)
+    }
+
+    /**
+     * Whether [message]'s options are still answerable.
+     *
+     * Deliberately NOT "any later message": the server puts lifecycle rows
+     * (`queued`/`joined`/`ended`) and paced flow messages on the visitor
+     * stream, so an agent joining mid-prompt would disable a prompt the server
+     * still considers open. The discriminator is a later **visitor-authored**
+     * row, which can only come from this client's own send or from a restored
+     * transcript.
+     */
+    fun promptIsLive(message: Message): Boolean {
+        val id = _currentSessionId.value ?: return false
+        val state = sessionsState.value[id] ?: return false
+        val promptIndex = state.messages.indexOfFirst { it.id == message.id }
+        if (promptIndex < 0) return false
+        return state.messages
+            .drop(promptIndex + 1)
+            .none { it.role == MessageRole.EXTERNAL }
     }
 
     /** Notify the peer the user is typing. Cheap to call; SDK debounces. */
@@ -174,6 +324,9 @@ class ChatService(private val manager: SDKManager) {
      * Queue a file upload onto the focused session (or the draft list
      * when no session is open yet). The tile appears immediately at
      * progress 0; live updates land via the SDK's progress callback.
+     *
+     * The write lane is widget-scoped, so no session is opened for the
+     * upload — an attachment can be the first thing a visitor sends.
      */
     fun uploadFile(uri: Uri, fileName: String, contentType: String) {
         val localId = UUID.randomUUID().toString()
@@ -191,7 +344,6 @@ class ChatService(private val manager: SDKManager) {
 
     fun removePendingAttachment(id: String) {
         var removed: PendingAttachment? = null
-        var hostSessionId: String? = null
 
         // Search the draft list first, then every session's pending list.
         draftPending.value.firstOrNull { it.id == id }?.let { row ->
@@ -202,7 +354,6 @@ class ChatService(private val manager: SDKManager) {
             for ((sid, state) in sessionsState.value) {
                 val row = state.pendingAttachments.firstOrNull { it.id == id } ?: continue
                 removed = row
-                hostSessionId = sid
                 sessionsState.update { states ->
                     val s = states[sid] ?: return@update states
                     states + (sid to s.copy(
@@ -217,18 +368,19 @@ class ChatService(private val manager: SDKManager) {
         val client = manager.client ?: return
         when (row.status) {
             PendingAttachment.Status.UPLOADING -> {
-                val sid = hostSessionId ?: return
                 // deleteAttachment matches the local id against the SDK's
-                // in-flight upload table and cancels it.
+                // in-flight upload table and cancels it. Fires regardless of
+                // which list hosted the row — the write lane is
+                // widget-scoped, and a draft-list upload is now the common
+                // case since uploads no longer wait on a session.
                 manager.scope.launch {
-                    runCatching { client.deleteAttachment(sid, id) }
+                    runCatching { client.deleteAttachment(id) }
                 }
             }
             PendingAttachment.Status.COMPLETED -> {
-                val sid = hostSessionId ?: return
                 val serverId = row.attachment?.id ?: return
                 manager.scope.launch {
-                    runCatching { client.deleteAttachment(sid, serverId) }
+                    runCatching { client.deleteAttachment(serverId) }
                 }
             }
             PendingAttachment.Status.ERROR -> Unit // local remove only
@@ -305,13 +457,31 @@ class ChatService(private val manager: SDKManager) {
 
     // MARK: - Upload internals
 
-    private suspend fun ensureChatSession(): String {
-        _currentSessionId.value?.let { return it }
+    /**
+     * Open a chat session by SENDING — `startChat` carries [payload] as the
+     * visitor's first message and returns the new session id.
+     *
+     * This is the only path that opens a chat. Uploads are widget-scoped and
+     * never open one, and the sidebar's [openSession] is view-only.
+     *
+     * The mutex means a second send arriving while a start is in flight
+     * waits and then sends normally — it must NOT start its own session, and
+     * it can't join by payload either, since the first message is already
+     * spoken for.
+     */
+    private suspend fun openAndSend(payload: SendMessagePayload): String {
+        val client = manager.client ?: throw IllegalStateException("SDK not initialized")
         return startMutex.withLock {
-            _currentSessionId.value?.let { return@withLock it }
-            val client = manager.client ?: throw IllegalStateException("SDK not initialized")
+            _currentSessionId.value?.let { existing ->
+                withContext(Dispatchers.IO) { client.sendMessage(existing, payload) }
+                return@withLock existing
+            }
+            // startChat returns the session id BEFORE the message goes out,
+            // and a first message that fails to DELIVER does not throw — it
+            // arrives as MessageUpdated(FAILED) so the user can retry. Only a
+            // terminal refusal throws.
             val response = withContext(Dispatchers.IO) {
-                client.startSession(StartSessionOptions(channel = Channel.CHAT, sessionId = null))
+                client.startChat(StartChatOptions(firstMessage = payload))
             }
             val newId = response.sessionId
             // Merge any draft tiles queued while the start was in flight.
@@ -333,19 +503,16 @@ class ChatService(private val manager: SDKManager) {
             updatePending(localId) { it.copy(status = PendingAttachment.Status.ERROR, errorText = "Client not ready") }
             return
         }
-        val sid = try {
-            ensureChatSession()
-        } catch (e: Throwable) {
-            updatePending(localId) { it.copy(status = PendingAttachment.Status.ERROR, errorText = "Couldn't start chat session") }
-            return
-        }
-
-        // If the user removed the tile while we waited for the session, abort.
+        // `uploadFile` appends the row and then LAUNCHES this coroutine, so a
+        // × tap can run in between. If the row is gone by the time we get
+        // here, abort before any wire work starts — the cancel it fired
+        // landed before the SDK registered its in-flight entry, so it would
+        // have degraded to a DELETE of an id the server never saw, leaving an
+        // orphan blob behind this upload.
         if (!pendingExists(localId)) return
 
         try {
             val attachment = client.uploadAttachment(
-                sessionId = sid,
                 uri = uri,
                 fileName = fileName,
                 uploadId = localId,

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Ported from `web/chat/src/lib/assets/icons.svelte`'s `download` symbol —
+  Origon's own artwork, which is what stands in for the SF Symbol
+  `arrow.down.circle` that `apps/ios/origon-ios/Components/MessageBubble.swift`
+  renders on the attachment row (SF Symbols do not port — RULES.md). The web
+  capsule is the layout iOS says its row matches, so its glyph is the right
+  donor. Stroke geometry, width, and terminals copied verbatim.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M12,3.75 V14.25 M12,14.25 L7.5,9.75 M12,14.25 L16.5,9.75 M3.75,17.25 V18.75 C3.75,19.5784 4.42157,20.25 5.25,20.25 H18.75 C19.5784,20.25 20.25,19.5784 20.25,18.75 V17.25"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

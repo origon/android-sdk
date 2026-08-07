@@ -1,11 +1,10 @@
 package origon.example.android.services
 
 import ai.origon.sdk.AudioOutputRoute
-import ai.origon.sdk.Channel
 import ai.origon.sdk.ClientEvent
 import ai.origon.sdk.DisconnectReason
 import ai.origon.sdk.SessionException
-import ai.origon.sdk.StartSessionOptions
+import ai.origon.sdk.StartCallOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -68,10 +67,10 @@ class CallService(private val manager: SDKManager) {
         _muted.value = false
         _speakerOn.value = false
         try {
-            // startSession blocks on the FFI runtime (HTTP + QUIC dial) —
+            // startCall blocks on the FFI runtime (HTTP + QUIC dial) —
             // hop off the main thread.
             val response = withContext(Dispatchers.IO) {
-                client.startSession(StartSessionOptions(channel = Channel.VOICE))
+                client.startCall(StartCallOptions())
             }
             sessionId = response.sessionId
         } catch (e: Throwable) {
@@ -167,6 +166,9 @@ class CallService(private val manager: SDKManager) {
     /** Map a structured [DisconnectReason] to short text. null = clean close. */
     private fun disconnectReasonText(reason: DisconnectReason): String? = when (reason) {
         is DisconnectReason.LocalClose -> null
+        // Clean end from the server side — not a failure, so no error text.
+        // Matches the iOS example's `.sessionEnded` treatment.
+        is DisconnectReason.SessionEnded -> null
         is DisconnectReason.NetworkLoss -> "Network connection lost"
         is DisconnectReason.TokenInvalid,
         is DisconnectReason.TokenExpired,

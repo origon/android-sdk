@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Three dots in a ring — the Android counterpart of iOS's `ellipsis.circle`,
+    which the example's sidebar footer uses to open the options menu. SF Symbols
+    are Apple's and do not port, so the glyph is drawn here at the same optical
+    weight: a 1.5dp ring on a 24dp box with three 1.6dp-radius dots.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?attr/colorControlNormal">
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M12,2.75A9.25,9.25 0,1 0,12 21.25A9.25,9.25 0,1 0,12 2.75zM12,4.25A7.75,7.75 0,1 1,12 19.75A7.75,7.75 0,1 1,12 4.25z" />
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M8.1,12m-1.6,0a1.6,1.6 0,1 1,3.2 0a1.6,1.6 0,1 1,-3.2 0" />
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M12,12m-1.6,0a1.6,1.6 0,1 1,3.2 0a1.6,1.6 0,1 1,-3.2 0" />
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M15.9,12m-1.6,0a1.6,1.6 0,1 1,3.2 0a1.6,1.6 0,1 1,-3.2 0" />
+</vector>

@@ -69,7 +69,7 @@ internal object SessionBridge {
 
     /**
      * Replace session-level attributes injected as `data.attributes` on
-     * subsequent `startSession` calls. Null or empty clears.
+     * subsequent `startCall` / `startChat` calls. Null or empty clears.
      */
     @JvmStatic external fun setAttributes(handle: Long, attributesJson: String?)
 
@@ -99,9 +99,27 @@ internal object SessionBridge {
      * @param sessionId pass an existing session id to resume; null to create new.
      * @param dataJson optional consumer-defined raw JSON payload.
      */
-    @JvmStatic external fun startSession(
+    @JvmStatic external fun startCall(
         handle: Long,
-        channel: Int,
+        sessionId: String?,
+        dataJson: String?,
+    ): StartSessionResponse
+
+    /**
+     * Start a chat, sending the visitor's first message as part of the call.
+     * [firstMessageJson] is REQUIRED — a `SendMessagePayload` JSON, the same
+     * shape [sendMessage] takes.
+     *
+     * The server reaps a chat that stays silent past its first-message
+     * deadline, so an API that opened a session and then waited for a human to
+     * type was racing that reap. Carrying the message here makes the race
+     * unreachable. A first message that fails to DELIVER does not throw — the
+     * session is live and the failure arrives as `MessageUpdated` with
+     * `status = failed`; only a TERMINAL refusal throws.
+     */
+    @JvmStatic external fun startChat(
+        handle: Long,
+        firstMessageJson: String,
         sessionId: String?,
         dataJson: String?,
     ): StartSessionResponse
@@ -111,9 +129,21 @@ internal object SessionBridge {
      * of band (multi-device handoff, deeplink, persisted session).
      * Skips the HTTPS call and dials the transport directly.
      */
-    @JvmStatic external fun joinSession(
+    @JvmStatic external fun joinCall(
         handle: Long,
-        channel: Int,
+        sessionId: String,
+        url: String,
+        token: String,
+    )
+
+    /**
+     * Attach to an existing chat obtained out of band — the agent /
+     * chat-offered path. Takes NO first message, unlike [startChat]: joining
+     * is entering a room whose first-message gate is ALREADY released, which
+     * is why this participant is being offered the conversation.
+     */
+    @JvmStatic external fun joinChat(
+        handle: Long,
         sessionId: String,
         url: String,
         token: String,
@@ -166,12 +196,15 @@ internal object SessionBridge {
     // ── Attachments ──────────────────────────────────────────────────
 
     /**
-     * Upload `bytes` as an attachment on the named session. MIME is
-     * auto-detected by the SDK from the content + [name]; the caller
-     * does not pass a content type.
+     * Upload a file as an attachment against the WIDGET the handle was
+     * created against. MIME is auto-detected by the SDK from the content
+     * + [name]; the caller does not pass a content type.
+     *
+     * There is NO session argument and no session prerequisite — an
+     * attachment can be the first thing a visitor sends.
      *
      * **Path-based, streamed from disk.** The SDK opens the file at
-     * [path] via `tokio::fs::File::open` inside its own process and
+     * [path] off-thread (smol `blocking`) inside its own process and
      * streams it through lumen's multipart encoder — the body is
      * never fully resident in memory, safe for arbitrarily large
      * files. Blocking — performs the HTTPS multipart POST on the
@@ -189,8 +222,7 @@ internal object SessionBridge {
      * same value to [deleteAttachment] (as the `key` argument) to
      * cancel this upload before it completes. After upload completes
      * successfully, use the server-issued `attachment.id` for deletion
-     * instead. The pair (`sessionId`, `uploadId`) must be unique
-     * across active uploads.
+     * instead. [uploadId] must be unique across active uploads.
      *
      * [progressCb] is optional. When provided, its `onProgress` fires
      * from a Rust worker thread (see [UploadProgressCallback]).
@@ -205,7 +237,6 @@ internal object SessionBridge {
      */
     @JvmStatic external fun uploadAttachment(
         handle: Long,
-        sessionId: String,
         uploadId: String,
         path: String,
         name: String,
@@ -218,12 +249,11 @@ internal object SessionBridge {
      * upload table (keyed by `uploadId`) first; if found, the upload
      * is cancelled with no network call. Otherwise `key` is treated
      * as a server-issued `attachment.id` and the SDK calls
-     * `DELETE <sessionUrl>/attachment/:key`. Blocking — use from
-     * [Dispatchers.IO].
+     * `DELETE <endpoint>/attachment/:key`. Session-less like
+     * [uploadAttachment]. Blocking — use from [Dispatchers.IO].
      */
     @JvmStatic external fun deleteAttachment(
         handle: Long,
-        sessionId: String,
         key: String,
     )
 
@@ -245,10 +275,6 @@ internal object SessionBridge {
     @JvmStatic external fun pollEvent(handle: Long): SessionEvent?
 
     // ── Discriminant constants (mirrored from Rust) ──────────────────
-
-    // Channel — see SessionBridge.startSession(channel: Int).
-    const val CHANNEL_CHAT = 0
-    const val CHANNEL_VOICE = 1
 
     // Audio output route — see SessionBridge.setAudioOutput(route: Int).
     const val AUDIO_OUTPUT_DEFAULT = 0
@@ -273,6 +299,11 @@ internal object SessionBridge {
     const val EVENT_DISCONNECTED = 12
     const val EVENT_CALL_ERROR = 13
     const val EVENT_AUDIO_ROUTE_CHANGED = 14
+
+    /** Chat session ended cleanly by server signal — `messageJson` carries
+     *  the `{reason, acw?}` payload as JSON. No `EVENT_DISCONNECTED`
+     *  follows. Mirrors `SESSION_EVENT_CHAT_SESSION_ENDED` in `jni_bridge.rs`. */
+    const val EVENT_CHAT_SESSION_ENDED = 15
 
     // Error discriminants — value of SessionException.kind.
     const val ERROR_NOT_INITIALIZED = 1
@@ -303,4 +334,9 @@ internal object SessionBridge {
     const val DISCONNECT_REASON_REPLAY_LOST = 12
     const val DISCONNECT_REASON_SERVER_CLOSED = 13
     const val DISCONNECT_REASON_TRANSPORT_CLOSED = 14
+    /** Server ended the session (`SESSION_ENDED`, 0x1040) — bridge collapse,
+     *  controller destroy, or idle-GC reap. Terminal; a transport close
+     *  follows. Mirrors `SESSION_DISCONNECT_REASON_SESSION_ENDED` in the
+     *  Rust JNI bridge (`apps/sdk/session/src/jni_bridge.rs`). */
+    const val DISCONNECT_REASON_SESSION_ENDED = 15
 }

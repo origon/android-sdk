@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Ported from `web/chat/src/lib/assets/icons.svelte`'s `cross-small` symbol —
+  Origon's own artwork, the close glyph web's AttachmentsPreview renders.
+  Stands in for the SF Symbol `xmark.circle.fill` iOS uses there (SF Symbols
+  do not port — RULES.md). Stroke geometry copied verbatim.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M7.75,7.75 L16.25,16.25 M16.25,7.75 L7.75,16.25"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round" />
+</vector>

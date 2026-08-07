@@ -13,8 +13,11 @@ internal data class AttachmentRule(
 )
 
 /**
- * Returned by `SessionBridge.getAttachmentPolicy`. Mirrors the
- * `chat.attachmentPolicy` block in the `/config` body.
+ * Returned by `SessionBridge.getAttachmentPolicy`. Mirrors the TOP-LEVEL
+ * `attachmentPolicy` block in the `/config` body — NOT nested under `chat`.
+ * (Producer: `platform/connect` CONTRACT.md §3. The native layer reads the
+ * top-level key in `apps/sdk` `session_manager.rs`; this comment claimed the
+ * nested path until 2026-07-28.)
  *
  * **ABI-locked constructor signature** — four `AttachmentRule`s in
  * the order shown.

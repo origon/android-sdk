@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Play triangle for the audio preview's transport control. Neither Origon
+  catalog carries one — web/chat's MessageItem references an `Icon
+  name="play"` whose symbol does not exist in its icons.svelte (noted for
+  that project's owner) — so the glyph is drawn here, the `ic_chevron_left`
+  precedent: a universal shape, not SF Symbol artwork. Rounded joins match
+  the catalog's stroke style.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M8,5.5 L18.5,12 L8,18.5 Z"
+        android:fillColor="#FFFFFFFF"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineJoin="round" />
+</vector>
