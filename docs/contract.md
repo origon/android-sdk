@@ -24,6 +24,12 @@ registers cross-repository contracts that must change and validate together.
   The opaque endpoint generation and exact token are persisted under no-backup
   storage. Logout unregisters the exact token/provider/generation tuple before
   clearing local notification authority.
+- Logout clears local generation authority even when the generation-bound
+  backend unregister fails or no initialized client exists. A delayed provider
+  delivery therefore cannot promote its preview after local identity removal.
+  Clearing authority also suspends later FCM callbacks and already-queued
+  registrations for that client epoch; only attaching a newly initialized
+  client resumes registration.
 - Notification data is trusted for previews only when `endpointGeneration`
   matches the local generation. A mismatch must render generic content or be
   suppressed. A tap opens the named chat with takeover. Provider invalid-token

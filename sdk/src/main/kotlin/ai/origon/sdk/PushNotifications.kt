@@ -62,6 +62,11 @@ object OrigonPushNotifications {
         OrigonClient.registerForPushNotifications(token)
     }
 
+    /** Clear local preview authority during logout, even without a live client. */
+    fun clearAuthority(context: Context) {
+        PushRegistrar.clearAuthority(context)
+    }
+
     fun isCurrent(context: Context, data: Map<String, String>): Boolean {
         return generationMatches(
             PushAuthorityStore.load(context.applicationContext)?.generation,
