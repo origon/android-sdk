@@ -17,6 +17,7 @@ built with Jetpack Compose + Kotlin coroutines.
 - Android Studio (Koala or newer) **or** the command-line path below
 - JDK 17–21
 - Android SDK Platform 37 + build-tools 37
+- Android NDK 27.2.12479018
 - A device or emulator on **API 23+** (Android 6.0).
 
 ## Getting started
@@ -31,7 +32,8 @@ sync, pick a device, and Run.
 ```bash
 brew install openjdk@21
 brew install --cask android-commandlinetools
-sdkmanager "platform-tools" "build-tools;37.0.0" "platforms;android-37"
+sdkmanager "platform-tools" "build-tools;37.0.0" "platforms;android-37" \
+  "ndk;27.2.12479018"
 
 cd android-sdk/examples/origon-sdk-example-android
 ./run.sh
