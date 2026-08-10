@@ -10,6 +10,10 @@ plugins {
 android {
     namespace = "ai.origon.sdk"
     compileSdk = 35
+    // AGP otherwise selects its own default NDK and may retain the prebuilt
+    // Rust libraries behind an "Unable to strip" warning. This is the same
+    // toolchain that builds and validates the three native inputs.
+    ndkVersion = "27.2.12479018"
 
     defaultConfig {
         // API 23 (Android 6.0). The native audio backend uses Oboe, which
@@ -50,6 +54,7 @@ android {
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+    testImplementation(kotlin("test"))
 }
 
 mavenPublishing {

@@ -23,29 +23,19 @@ class OrigonClient(
     config: ClientConfig,
 ) : AutoCloseable {
 
-    private val appContext: android.content.Context = context.applicationContext
+    internal val appContext: android.content.Context = context.applicationContext
 
     /**
-     * Stable per-install device identifier (`Settings.Secure.ANDROID_ID`).
-     * Sent as `deviceId` on push register/unregister, and used as the
-     * `userId` fallback when the consumer omits one.
+     * Random app-install UUID under no-backup storage. Never hardware-derived.
      */
-    private val deviceId: String? = resolveDeviceId(appContext)
+    private val installationId: String = InstallationIdentity.loadOrCreate(appContext)
 
     private val handle: Long = SessionBridge.initialize(
         endpoint = config.endpoint,
         bundleId = appContext.packageName,
         token = config.token,
-        // `userId` is optional at the SDK surface but required by the
-        // core. Fall back to the device id so anonymous users still get
-        // a stable identity; fail fast if neither is available.
-        userId = config.userId ?: deviceId ?: throw SessionException(
-            kind = SessionBridge.ERROR_MISSING_FIELD,
-            statusCode = 0,
-            code = "user_id",
-            message = "userId was not provided and no device identifier is available",
-        ),
-        deviceId = deviceId,
+        userId = config.userId ?: installationId,
+        installationId = installationId,
         attributesJson = config.attributes?.let { JSON.encodeToString(JsonObject.serializer(), it) },
     )
     private val closed = AtomicBoolean(false)
@@ -238,6 +228,25 @@ class OrigonClient(
         )
     }
 
+    /** Passively attach retained active chats without replacing another install. */
+    fun restoreActiveChats(): List<RestoreResult> {
+        ensureOpen()
+        return SessionBridge.restoreActiveChats(handle).map { result ->
+            RestoreResult(
+                sessionId = result.sessionId,
+                status = restoreStatus(result.status),
+                error = result.error,
+            )
+        }
+    }
+
+    /** Explicit history/push open. Background restore must use restoreActiveChats. */
+    fun openChat(sessionId: String, takeover: Boolean): StartSessionResponse {
+        ensureOpen()
+        val result = SessionBridge.openChat(handle, sessionId, takeover)
+        return StartSessionResponse(result.sessionId, result.url, result.token)
+    }
+
     /**
      * Attach to a **voice call** whose [StartSessionResponse] was obtained out
      * of band (multi-device handoff, deeplink, persisted session).
@@ -285,21 +294,27 @@ class OrigonClient(
         SessionBridge.endAllSessions(handle)
     }
 
+    /** Generation-bound logout gate. Completes before returning so [close] is safe next. */
+    fun unregisterForPushNotifications() {
+        ensureOpen()
+        PushRegistrar.unregisterBlocking(this)
+    }
+
     // ── Push notifications ───────────────────────────────────────────
     // The public, buffering entry points are the companion-object
     // `registerForPushNotifications` / `unregisterForPushNotifications`.
     // These instance methods are the blocking JNI calls they dispatch to.
 
     /** Blocking JNI call — invoked off the main thread by [PushRegistrar]. */
-    internal fun registerPush(token: String, provider: String, environment: String?) {
+    internal fun registerPush(token: String, provider: String, environment: String?): String {
         ensureOpen()
-        SessionBridge.registerPush(handle, token, provider, environment)
+        return SessionBridge.registerPush(handle, token, provider, environment)
     }
 
     /** Blocking JNI call — invoked off the main thread by [PushRegistrar]. */
-    internal fun unregisterPush() {
+    internal fun unregisterPush(token: String, provider: String, generation: String) {
         ensureOpen()
-        SessionBridge.unregisterPush(handle)
+        SessionBridge.unregisterPush(handle, token, provider, null, generation)
     }
 
     /** Snapshot of every active session. */
@@ -685,23 +700,6 @@ class OrigonClient(
         fun unregisterForPushNotifications() {
             PushRegistrar.unregister()
         }
-
-        /**
-         * Resolve a stable per-install device id from
-         * `Settings.Secure.ANDROID_ID`. Returns null on the rare devices
-         * that report a blank id, which disables push registration and,
-         * when no `userId` is supplied, surfaces as an init error.
-         */
-        @android.annotation.SuppressLint("HardwareIds")
-        private fun resolveDeviceId(context: android.content.Context): String? =
-            try {
-                android.provider.Settings.Secure.getString(
-                    context.contentResolver,
-                    android.provider.Settings.Secure.ANDROID_ID,
-                )?.takeIf { it.isNotEmpty() }
-            } catch (_: Throwable) {
-                null
-            }
 
         private val JSON = Json { ignoreUnknownKeys = true }
     }

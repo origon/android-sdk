@@ -61,7 +61,7 @@ internal object SessionBridge {
         bundleId: String?,
         token: String?,
         userId: String?,
-        deviceId: String?,
+        installationId: String?,
         attributesJson: String?,
     ): Long
 
@@ -124,6 +124,16 @@ internal object SessionBridge {
         dataJson: String?,
     ): StartSessionResponse
 
+    /** Passive, newest-first retained-chat restore with per-id outcomes. */
+    @JvmStatic external fun restoreActiveChats(handle: Long): Array<ai.origon.sdk.bridge.RestoreResult>
+
+    /** Explicit retained-chat open. takeover is true only for user intent. */
+    @JvmStatic external fun openChat(
+        handle: Long,
+        sessionId: String,
+        takeover: Boolean,
+    ): StartSessionResponse
+
     /**
      * Attach to a session whose start-session response was obtained out
      * of band (multi-device handoff, deeplink, persisted session).
@@ -157,17 +167,23 @@ internal object SessionBridge {
     /**
      * `POST /push/register`. [token] is the FCM token; [provider] is
      * `"fcm"`; [environment] is unused for FCM and passed as null.
-     * No-ops when the client was created without a device id.
+     * Returns the opaque endpoint generation.
      */
     @JvmStatic external fun registerPush(
         handle: Long,
         token: String,
         provider: String,
         environment: String?,
-    )
+    ): String
 
-    /** `POST /push/unregister`. No-ops when there is no device id. */
-    @JvmStatic external fun unregisterPush(handle: Long)
+    /** Generation-bound `POST /push/unregister`. */
+    @JvmStatic external fun unregisterPush(
+        handle: Long,
+        token: String,
+        provider: String,
+        environment: String?,
+        generation: String,
+    )
 
     // ── Voice controls ───────────────────────────────────────────────
 

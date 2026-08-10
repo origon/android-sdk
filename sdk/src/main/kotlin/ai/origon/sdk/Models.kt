@@ -106,10 +106,8 @@ data class ClientConfig(
     val endpoint: String,
     val token: String? = null,
     /**
-     * Optional. When omitted, the SDK falls back to the device
-     * identifier (`Settings.Secure.ANDROID_ID`) so anonymous users still
-     * get a stable identity. Initialization fails only if both this and
-     * the device identifier are unavailable.
+     * Optional. When omitted, the SDK uses its random, no-backup app-install
+     * id as an opaque anonymous id. It is never a hardware/person identity.
      */
     val userId: String? = null,
     /**
@@ -380,10 +378,34 @@ data class SessionSummary(
     val sessionId: String,
     val subject: String,
     val channel: Channel,
+    /** Live only on the cx owner that served this directory row. */
+    val active: Boolean,
     val createdAt: String,
     val updatedAt: String,
     val lastMessage: Message? = null,
     val contact: Contact? = null,
+)
+
+enum class RestoreStatus {
+    CONNECTED,
+    ALREADY_CONNECTED,
+    ACTIVE_ELSEWHERE,
+    NO_LONGER_ACTIVE,
+    FAILED,
+}
+
+internal fun restoreStatus(value: Int): RestoreStatus = when (value) {
+    0 -> RestoreStatus.CONNECTED
+    1 -> RestoreStatus.ALREADY_CONNECTED
+    2 -> RestoreStatus.ACTIVE_ELSEWHERE
+    3 -> RestoreStatus.NO_LONGER_ACTIVE
+    else -> RestoreStatus.FAILED
+}
+
+data class RestoreResult(
+    val sessionId: String,
+    val status: RestoreStatus,
+    val error: String? = null,
 )
 
 /** Returned by [OrigonClient.getSession]. */
