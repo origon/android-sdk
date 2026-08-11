@@ -6,10 +6,14 @@ registers cross-repository contracts that must change and validate together.
 
 ## Mobile chat continuity and push
 
-- The wrapper supplies JNI `initialize` with a random app-install UUID persisted
-  under Android's no-backup storage. It never derives continuity identity from
+- The wrapper supplies JNI `initialize` with a canonical lowercase UUIDv4 generated
+  by the platform CSPRNG and persisted as a confidential bearer capability under
+  Android's no-backup storage. It never derives continuity identity from
   `Settings.Secure.ANDROID_ID` or other hardware identity. If `userId` is omitted,
-  the same install-scoped value is used only as an anonymous opaque user id.
+  the same install-scoped value is used only as an anonymous opaque user id; it is
+  not a person, verified identity, or proof of endpoint login. Neither
+  `installationId` nor its anonymous `userId` alias may enter logs, URLs, or Debug
+  output.
 - The JNI ABI is consumed as one hardcut: `initialize(... installationId ...)`,
   required `SessionSummary.active`, `restoreActiveChats`, `openChat`,
   generation-returning `registerPush`, and generation-bound `unregisterPush`.
@@ -20,6 +24,17 @@ registers cross-repository contracts that must change and validate together.
   another installation. Explicit history navigation and a notification tap call
   `openChat(sessionId, takeover = true)`. The wrapper/core manager remains the
   sole per-session operation owner.
+- Notification enablement governs push registration/delivery only; it never disables
+  list/history/start or same-install restore. Anonymous continuity and push are scoped
+  to the exact trusted app + installation, while only a verified external subject may
+  authorize cross-install takeover or multi-install push fan-out. UUID disclosure can
+  impersonate that installation, redirect/suppress delivery, and disclose preview text.
+  Remediation is backend endpoint revocation, ending rooms bound to the old UUID, and
+  app-data reset/reinstall to mint a new UUID; the server TTL is not revocation.
+  Canonical producers: `/home/yl/workspace/platform/gw/CONTRACT.md`
+  native-admission row, `/home/yl/workspace/platform/cx/CONTRACT.md` §3/§7,
+  and `/home/yl/workspace/apps/sdk/CONTRACT.md` plus
+  `/home/yl/workspace/apps/sdk/session/docs/contract.md`.
 - FCM token refresh is repeatable and the latest successful registration wins.
   The opaque endpoint generation and exact token are persisted under no-backup
   storage. Logout unregisters the exact token/provider/generation tuple before
