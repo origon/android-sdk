@@ -45,10 +45,22 @@ registers cross-repository contracts that must change and validate together.
   Clearing authority also suspends later FCM callbacks and already-queued
   registrations for that client epoch; only attaching a newly initialized
   client resumes registration.
-- Notification data is trusted for previews only when `endpointGeneration`
-  matches the local generation. A mismatch must render generic content or be
-  suppressed. A tap opens the named chat with takeover. Provider invalid-token
-  cleanup and the server's 90-day endpoint TTL are the uninstall cleanup path.
+- The inbound FCM payload is the reciprocal consumer of
+  `/home/yl/workspace/platform/cx/CONTRACT.md` §7. First-party destinations
+  `ai.origon.android.beta` and `ai.origon.android` are data-only; third-party
+  destinations retain cx's generic top-level notification fallback alongside
+  the custom data. The custom-data string fields are `type`, `sessionId`,
+  `clientId`, `messageId`, `endpointGeneration`, `preview`, and optional `title`;
+  cx omits a blank normalized title rather than sending `null`. Regardless of
+  provider fallback, the wrapper exposes custom-data `title` and `preview` only
+  after `endpointGeneration` exactly matches the locally persisted generation.
+  Missing or stale generation exposes neither copy field (the whole payload
+  fails closed), and an absent or blank title becomes `null`. `title` is an
+  authorized body property rather than part of the data class's constructor,
+  component identity, equality, hash, or `copy`; those retain their legacy
+  four-field JVM ABI. A tap opens the named chat with takeover. Provider
+  invalid-token cleanup and the server's 90-day endpoint TTL are the uninstall
+  cleanup path.
 
 ## Release gate
 

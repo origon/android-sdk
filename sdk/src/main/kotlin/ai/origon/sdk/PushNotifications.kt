@@ -53,7 +53,20 @@ data class OrigonNotificationPayload(
     val clientId: String?,
     val messageId: String?,
     val preview: String?,
-)
+) {
+    var title: String? = null
+        private set
+
+    internal constructor(
+        sessionId: String,
+        clientId: String?,
+        messageId: String?,
+        preview: String?,
+        title: String?,
+    ) : this(sessionId, clientId, messageId, preview) {
+        this.title = title
+    }
+}
 
 /** Firebase-facing token and notification-data helpers without owning FCM setup. */
 object OrigonPushNotifications {
@@ -74,15 +87,11 @@ object OrigonPushNotifications {
         )
     }
 
-    /** Returns null on generation mismatch so the host can suppress or go generic. */
+    /** Returns null on missing/mismatched generation so the host suppresses rich copy. */
     fun currentPayload(context: Context, data: Map<String, String>): OrigonNotificationPayload? {
-        if (!isCurrent(context, data)) return null
-        val sessionId = data["sessionId"]?.takeIf(String::isNotBlank) ?: return null
-        return OrigonNotificationPayload(
-            sessionId = sessionId,
-            clientId = data["clientId"],
-            messageId = data["messageId"],
-            preview = data["preview"]?.takeIf(String::isNotBlank),
+        return authorizedPayload(
+            localGeneration = PushAuthorityStore.load(context.applicationContext)?.generation,
+            data = data,
         )
     }
 
@@ -93,3 +102,18 @@ object OrigonPushNotifications {
 
 internal fun generationMatches(local: String?, data: Map<String, String>): Boolean =
     local != null && data["endpointGeneration"] == local
+
+internal fun authorizedPayload(
+    localGeneration: String?,
+    data: Map<String, String>,
+): OrigonNotificationPayload? {
+    if (!generationMatches(localGeneration, data)) return null
+    val sessionId = data["sessionId"]?.takeIf(String::isNotBlank) ?: return null
+    return OrigonNotificationPayload(
+        sessionId = sessionId,
+        clientId = data["clientId"],
+        messageId = data["messageId"],
+        preview = data["preview"]?.takeIf(String::isNotBlank),
+        title = data["title"]?.takeIf(String::isNotBlank),
+    )
+}

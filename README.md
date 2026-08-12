@@ -375,22 +375,35 @@ class AppMessagingService : FirebaseMessagingService() {
 }
 ```
 
-In `onMessageReceived`, gate any preview before building a notification:
+In `onMessageReceived`, authorize all server-provided visible copy before
+building a notification:
 
 ```kotlin
 override fun onMessageReceived(message: RemoteMessage) {
     val payload = OrigonPushNotifications.currentPayload(this, message.data)
     if (payload == null) {
-        // Generation mismatch: suppress, or show only generic "New message".
+        // Missing/stale generation: neither title nor preview is exposed.
+        // Suppress, or show only app-owned generic copy.
         return
     }
-    showNotification(body = payload.preview ?: "New message", payload = payload)
+    showNotification(
+        title = payload.title ?: "Origon",
+        body = payload.preview ?: "New message",
+        payload = payload,
+    )
 }
 ```
 
+`title` is the optional server-normalized human agent name. An absent or blank
+title is exposed as `null`. Never read `message.data["title"]` or
+`message.data["preview"]` directly: `currentPayload` returns them only after an
+exact `endpointGeneration` match, and returns `null` when the generation is
+missing or stale.
+
 Use a stable `PendingIntent` carrying `sessionId`; when the user taps, initialize
 the client and call `OrigonPushNotifications.open(client, payload)`. A tap is
-explicit takeover intent; background receipt is not.
+explicit takeover intent; background receipt is not. Keep tap extras to routing
+and authorization fields—do not copy `title` or `preview` into them.
 
 Declare the service in your `AndroidManifest.xml`:
 
@@ -461,6 +474,7 @@ requires all three ABIs, no `.symtab`, all four continuity JNI exports, and
 | `setAttributes(attributes)` | Replace session-level attributes injected as `data.attributes` on `startSession`. |
 | `OrigonClient.registerForPushNotifications(token)` | Companion. Register an FCM token (buffered until init; latest wins). |
 | `OrigonClient.unregisterForPushNotifications()` | Companion. Remove this device's push registration (e.g. on logout). |
+| `OrigonPushNotifications.currentPayload(context, data)` | Validate the exact endpoint generation, then expose routing plus optional authorized `title` / `preview`; returns `null` for missing or stale authority. |
 | `startMessage` / `isChatEnabled` / `isCallEnabled` / `multipleChannels` / `attachmentPolicy` / `serverConfig` | Cached `/config` getters. |
 | `OrigonClient.initLogging(filter)` | Install Rust-side `tracing` subscriber. |
 
@@ -479,6 +493,7 @@ requires all three ABIs, no `.symtab`, all four continuity JNI exports, and
 | `StartSessionResponse` | sessionId, url, token. |
 | `JoinSessionInput` | channel, sessionId, url, token. |
 | `ActiveSession` | sessionId, channel. |
+| `OrigonNotificationPayload` | Authorized notification routing plus optional `title` and `preview`; blank title is `null`. |
 | `AttachmentRule` / `AttachmentPolicy` | tenant policy for attachments. |
 | `ServerConfig` | full `/config` snapshot (start message, capability flags, attachment policy). |
 | `DisconnectReason` | sealed class of structured reasons. |

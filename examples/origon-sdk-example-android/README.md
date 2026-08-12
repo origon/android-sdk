@@ -87,6 +87,13 @@ Two extra notes for SDK consumers (both are worked around in this example):
   `SessionException.kind` is a public `Int`. This example mirrors the
   discriminants in `util/SdkErrorKinds.kt`.
 
+For an FCM data-only integration, pass `RemoteMessage.data` through
+`OrigonPushNotifications.currentPayload` before displaying any server copy.
+Only an exact endpoint-generation match exposes `payload.title` and
+`payload.preview`; use app-owned generic copy when it returns `null`, and fall
+back from a null title to your app name. Do not read the raw `title` or `preview`
+keys directly, or retain those visible-copy fields in tap-time navigation extras.
+
 ## Permissions
 
 - **Microphone** (`RECORD_AUDIO`) — voice calls. Requested at call time; the
