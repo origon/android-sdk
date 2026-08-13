@@ -4,6 +4,19 @@ This public repository wraps the native JNI ABI produced by
 `/home/yl/workspace/apps/sdk/session`. Public examples explain usage; this file
 registers cross-repository contracts that must change and validate together.
 
+## Interactive chat prompts
+
+- The wrapper mirrors apps/sdk's JSON surface for incoming
+  `Message.buttons: [{label,value,type}]` and
+  `Message.gallery: [{title,description,image?,buttons}]`; a gallery image is
+  legitimately absent. `SendMessagePayload` mirrors top-level optional `value`
+  and `galleryLabel`, while `text` carries the selected caption.
+- Canonical wire production/consumption is registered in
+  `/home/yl/workspace/platform/cx/CONTRACT.md` (Button / Gallery reply shape;
+  consumers of `buttons` / `gallery`) and the native producer/consumer mirror
+  in `/home/yl/workspace/apps/sdk/CONTRACT.md`. This wrapper adds no alternate
+  envelope or persistence.
+
 ## Mobile chat continuity and push
 
 - The wrapper supplies JNI `initialize` with a canonical lowercase UUIDv4 generated
