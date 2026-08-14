@@ -97,7 +97,7 @@ object OrigonPushNotifications {
 
     /** Notification taps are explicit user intent and may take over the chat. */
     fun open(client: OrigonClient, payload: OrigonNotificationPayload): StartSessionResponse =
-        client.openChat(payload.sessionId, takeover = true)
+        client.openChat(payload.sessionId, intent = ChatAccessIntent.NOTIFICATION)
 }
 
 internal fun generationMatches(local: String?, data: Map<String, String>): Boolean =

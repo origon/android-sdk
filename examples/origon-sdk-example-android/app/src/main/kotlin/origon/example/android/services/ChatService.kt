@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -128,10 +129,24 @@ class ChatService(private val manager: SDKManager) {
             // visitor's first message, and opening one here just to read a
             // past conversation would attach a participant and start a chat
             // nobody has spoken in. The session goes live on the first send.
-            val history = withContext(Dispatchers.IO) { client.getSession(id) }
-            sessionsState.update { it + (id to SessionUIState(messages = history.history)) }
-            _currentSessionId.value = id
-            adoptDrafts(id)
+            var focused = false
+            client.sessionUpdates(id).collect { update ->
+                when (update) {
+                    is ai.origon.sdk.SessionLoadUpdate.Snapshot -> sessionsState.update {
+                        val existing = it[id] ?: SessionUIState()
+                        it + (id to existing.copy(messages = update.value.session.history))
+                    }
+                    is ai.origon.sdk.SessionLoadUpdate.RefreshFailed -> {
+                        if (!update.cachedSnapshotEmitted) throw update.error
+                        _error.tryEmit("Could not refresh conversation: ${update.error.message}")
+                    }
+                }
+                if (!focused && update is ai.origon.sdk.SessionLoadUpdate.Snapshot) {
+                    _currentSessionId.value = id
+                    adoptDrafts(id)
+                    focused = true
+                }
+            }
             runCatching { manager.getSessions() }
         } catch (e: Throwable) {
             _error.tryEmit("Failed to open session: ${e.message}")

@@ -116,7 +116,41 @@ data class ClientConfig(
      * `kotlinx.serialization` before crossing the native boundary.
      */
     val attributes: JsonObject? = null,
+    /** Durable transcript cache is enabled unless explicitly disabled. */
+    val chatCachePolicy: ChatCachePolicy = ChatCachePolicy.ENABLED,
 )
+
+enum class ChatCachePolicy { ENABLED, DISABLED }
+
+enum class SessionLoadPolicy {
+    CACHE_THEN_NETWORK,
+    NETWORK_ONLY,
+    CACHE_ONLY;
+
+    internal fun toBridge(): Int = when (this) {
+        CACHE_THEN_NETWORK -> SessionBridge.LOAD_CACHE_THEN_NETWORK
+        NETWORK_ONLY -> SessionBridge.LOAD_NETWORK_ONLY
+        CACHE_ONLY -> SessionBridge.LOAD_CACHE_ONLY
+    }
+}
+
+@Serializable
+enum class SessionLoadSource {
+    @SerialName("cache") CACHE,
+    @SerialName("network") NETWORK,
+}
+
+enum class ChatAccessIntent {
+    PASSIVE,
+    EXPLICIT_NAVIGATION,
+    NOTIFICATION;
+
+    internal fun toBridge(): Int = when (this) {
+        PASSIVE -> SessionBridge.CHAT_ACCESS_PASSIVE
+        EXPLICIT_NAVIGATION -> SessionBridge.CHAT_ACCESS_EXPLICIT_NAVIGATION
+        NOTIFICATION -> SessionBridge.CHAT_ACCESS_NOTIFICATION
+    }
+}
 
 data class StartCallOptions(
     /** Existing session id to resume; null for a new session. */
@@ -415,6 +449,38 @@ data class SessionHistory(
     /** Who is currently driving the session. */
     val control: SessionControl = SessionControl.AI,
 )
+
+@Serializable
+data class SessionSnapshot(
+    val source: SessionLoadSource,
+    val authoritative: Boolean,
+    val refreshedAt: Long,
+    val session: SessionHistory,
+)
+
+@Serializable
+data class SessionsSnapshot(
+    val source: SessionLoadSource,
+    val authoritative: Boolean,
+    val refreshedAt: Long,
+    val sessions: List<SessionSummary>,
+)
+
+sealed interface SessionLoadUpdate {
+    data class Snapshot(val value: SessionSnapshot) : SessionLoadUpdate
+    data class RefreshFailed(
+        val error: SessionException,
+        val cachedSnapshotEmitted: Boolean,
+    ) : SessionLoadUpdate
+}
+
+sealed interface SessionsLoadUpdate {
+    data class Snapshot(val value: SessionsSnapshot) : SessionsLoadUpdate
+    data class RefreshFailed(
+        val error: SessionException,
+        val cachedSnapshotEmitted: Boolean,
+    ) : SessionsLoadUpdate
+}
 
 // ── Disconnect / events ──────────────────────────────────────────────
 

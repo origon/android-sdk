@@ -6,7 +6,7 @@ for chat and voice calls. Two screens:
 1. **Endpoint** — user enters an endpoint URL; the app calls
    `SDKManager.initialize(endpoint)` and persists the URL for next launch.
 2. **Home** — a chat surface with a navigation drawer listing past sessions
-   (`sdk.getSessions()`), a "New session" button, and a voice button that
+   (fed by the SDK's cache-first directory Flow), a "New session" button, and a voice button that
    starts a call (`CallService.startCall()`).
 
 This mirrors the iOS example (`apple-sdk/examples/origon-sdk-example-ios`),
@@ -28,6 +28,10 @@ Open `android-sdk/examples/origon-sdk-example-android` as a project, let it
 sync, pick a device, and Run.
 
 ### Command line (no Android Studio)
+
+Publish the sibling SDK to Maven Local first (`./gradlew
+:sdk:publishToMavenLocal` from the android-sdk root); this example intentionally
+resolves `ai.origon:sdk:0.0.0-LOCAL` during source validation.
 
 ```bash
 brew install openjdk@21
@@ -65,17 +69,19 @@ To wire OrigonSDK into your own app, start with these files:
 
 ## SDK dependency
 
-The SDK is consumed from Maven Central with no authentication:
+This source-validation example consumes the SDK artifact staged in Maven Local:
 
 ```kotlin
 // settings.gradle.kts → dependencyResolutionManagement.repositories
-mavenCentral()
+mavenLocal()
 
 // app/build.gradle.kts
-implementation("ai.origon:sdk:0.2.0")
+implementation("ai.origon:sdk:0.0.0-LOCAL")
 ```
 
-Bump the version string in `app/build.gradle.kts` to test a newer release.
+Run `./gradlew :sdk:publishToMavenLocal` from the android-sdk root before
+building the example. For a published consumer, remove `mavenLocal()` and use
+the current released `ai.origon:sdk:<version>` coordinate from Maven Central.
 
 Two extra notes for SDK consumers (both are worked around in this example):
 

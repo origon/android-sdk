@@ -13,6 +13,16 @@ class MobileContinuityTest {
     private val json = Json { ignoreUnknownKeys = true }
 
     @Test
+    fun durableCachePolicyDefaultsOnAndCanBeDisabled() {
+        assertEquals(ChatCachePolicy.ENABLED, ClientConfig("https://example.test").chatCachePolicy)
+        assertEquals(
+            ChatCachePolicy.DISABLED,
+            ClientConfig("https://example.test", chatCachePolicy = ChatCachePolicy.DISABLED)
+                .chatCachePolicy,
+        )
+    }
+
+    @Test
     fun sessionSummaryRequiresActive() {
         val complete = """{"sessionId":"s","subject":"x","channel":"chat","active":true,"createdAt":"c","updatedAt":"u"}"""
         assertTrue(json.decodeFromString<SessionSummary>(complete).active)

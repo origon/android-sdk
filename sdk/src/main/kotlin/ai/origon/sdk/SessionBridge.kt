@@ -2,6 +2,7 @@ package ai.origon.sdk
 
 import ai.origon.sdk.bridge.AttachmentPolicy
 import ai.origon.sdk.bridge.SessionEvent
+import ai.origon.sdk.bridge.SessionLoaderResult
 import ai.origon.sdk.bridge.StartSessionResponse
 
 /**
@@ -63,6 +64,7 @@ internal object SessionBridge {
         userId: String?,
         installationId: String?,
         attributesJson: String?,
+        cacheDir: String?,
     ): Long
 
     @JvmStatic external fun destroy(handle: Long)
@@ -88,6 +90,18 @@ internal object SessionBridge {
 
     /** `GET /session/<id>`. Returns the response body as a JSON string. */
     @JvmStatic external fun getSession(handle: Long, id: String): String
+
+    // ── Finite cache/network loaders ─────────────────────────────────
+
+    @JvmStatic external fun sessionLoaderStart(handle: Long, id: String, policy: Int): Long
+    @JvmStatic external fun directoryLoaderStart(handle: Long, policy: Int): Long
+    @JvmStatic external fun loaderNext(loader: Long): SessionLoaderResult
+    @JvmStatic external fun loaderCancel(loader: Long)
+    @JvmStatic external fun loaderFree(loader: Long)
+    @JvmStatic external fun removeCachedSession(handle: Long, id: String)
+    @JvmStatic external fun clearChatCache(handle: Long)
+    @JvmStatic external fun pruneChatCache(handle: Long)
+    @JvmStatic external fun clearChatCacheRoot(cacheRoot: String)
 
     // ── Per-session lifecycle ────────────────────────────────────────
 
@@ -132,6 +146,12 @@ internal object SessionBridge {
         handle: Long,
         sessionId: String,
         takeover: Boolean,
+    ): StartSessionResponse
+
+    @JvmStatic external fun openChatWithIntent(
+        handle: Long,
+        sessionId: String,
+        intent: Int,
     ): StartSessionResponse
 
     /**
@@ -300,6 +320,17 @@ internal object SessionBridge {
     // SessionControl — value of SessionEvent.control on CONTROL_UPDATED.
     const val CONTROL_AI = 0
     const val CONTROL_USER = 1
+
+    const val LOAD_CACHE_THEN_NETWORK = 0
+    const val LOAD_NETWORK_ONLY = 1
+    const val LOAD_CACHE_ONLY = 2
+    const val LOADER_UPDATE = 1
+    const val LOADER_END = 2
+    const val LOADER_ERROR = 3
+    const val LOADER_CANCELLED = 4
+    const val CHAT_ACCESS_PASSIVE = 0
+    const val CHAT_ACCESS_EXPLICIT_NAVIGATION = 1
+    const val CHAT_ACCESS_NOTIFICATION = 2
 
     // Event discriminants — value of SessionEvent.kind.
     const val EVENT_MESSAGE_ADDED = 1

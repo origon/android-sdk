@@ -27,7 +27,7 @@ registers cross-repository contracts that must change and validate together.
   not a person, verified identity, or proof of endpoint login. Neither
   `installationId` nor its anonymous `userId` alias may enter logs, URLs, or Debug
   output.
-- The JNI ABI is consumed as one hardcut: `initialize(... installationId ...)`,
+- The JNI ABI is consumed as one hardcut: `initialize(... installationId, cacheDir ...)`,
   required `SessionSummary.active`, `restoreActiveChats`, `openChat`,
   generation-returning `registerPush`, and generation-bound `unregisterPush`.
   The producer is `workspace/apps/sdk/session/src/jni_bridge.rs`; reciprocal
@@ -35,7 +35,7 @@ registers cross-repository contracts that must change and validate together.
   `workspace/apps/sdk/session/docs/contract.md`.
 - Passive foreground restore calls `restoreActiveChats()` and never takes over
   another installation. Explicit history navigation and a notification tap call
-  `openChat(sessionId, takeover = true)`. The wrapper/core manager remains the
+  `openChat(sessionId, intent = EXPLICIT_NAVIGATION/NOTIFICATION)`. The wrapper/core manager remains the
   sole per-session operation owner.
 - Notification enablement governs push registration/delivery only; it never disables
   list/history/start or same-install restore. Anonymous continuity and push are scoped
@@ -74,6 +74,22 @@ registers cross-repository contracts that must change and validate together.
   four-field JVM ABI. A tap opens the named chat with takeover. Provider
   invalid-token cleanup and the server's 90-day endpoint TTL are the uninstall
   cleanup path.
+- Cache lives only under credential-encrypted
+  `noBackupFilesDir/ai.origon.sdk/chat-cache-v1`. Finite session and directory
+  loaders use a bounded two-item `Flow`, pull on `Dispatchers.IO`, emit cache
+  before network, and cancel/join before freeing their native handle. Client
+  close rejects new JNI leases and waits active calls, native loaders and cache
+  writers. `clearAllChatCaches(context)` is handle-independent and returns only
+  after the cache subtree has been synchronously quarantined.
+  A derived device-protected caller context normally reroots through its global
+  credential-protected `applicationContext`. If that global context itself is
+  DPS (including `defaultToDeviceProtectedStorage`), caching fails closed to
+  disabled because Android has no public inverse of
+  `createDeviceProtectedStorageContext`; transcripts are never written into DPS.
+  API 23 storage is credential-protected by definition.
+  `ChatCachePolicy.DISABLED` passes no
+  native cache root. Static clear creates only the fixed cache subtree first so
+  clear-before-first-client and repeated clear remain idempotent.
 
 ## Release gate
 

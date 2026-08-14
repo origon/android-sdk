@@ -299,8 +299,21 @@ reported as `active` and never steals another installation's visitor stream:
 val report = client.restoreActiveChats()
 val elsewhere = report.filter { it.status == RestoreStatus.ACTIVE_ELSEWHERE }
 
-// Explicit history navigation or a notification tap is user intent.
-client.openChat(sessionId, takeover = true)
+// Explicit history navigation or a notification tap uses named authority.
+client.openChat(sessionId, intent = ChatAccessIntent.EXPLICIT_NAVIGATION)
+```
+
+History reads are finite cache-first flows. They emit a valid cached snapshot
+immediately when present, then one authoritative network snapshot (or a typed
+refresh failure that says whether cache was shown):
+
+```kotlin
+client.sessionUpdates(sessionId).collect { update ->
+    when (update) {
+        is SessionLoadUpdate.Snapshot -> render(update.value.session.history)
+        is SessionLoadUpdate.RefreshFailed -> showRefreshError(update.error)
+    }
+}
 ```
 
 Do not add a second host restore loop or attach the same id independently. An
@@ -444,7 +457,7 @@ immediately close the client.
 Release builds pin NDK `27.2.12479018` so AGP can strip the prebuilt Rust
 libraries instead of packaging them behind an “Unable to strip” warning. Before
 publication, run `scripts/verify-release-aar.sh` on the local release AAR; it
-requires all three ABIs, no `.symtab`, all four continuity JNI exports, and
+requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, and
 0x4000 PT_LOAD alignment on both 64-bit libraries.
 
 ## API Reference
@@ -458,7 +471,7 @@ requires all three ABIs, no `.symtab`, all four continuity JNI exports, and
 | `pollEvent()` | Non-blocking poll. Returns `null` when idle. |
 | `startSession(options)` | Open a session. Returns `(sessionId, url, token)`. |
 | `restoreActiveChats()` | Passively attach retained active chats and return per-id outcomes. |
-| `openChat(sessionId, takeover)` | Explicitly open one retained chat; takeover is user intent. |
+| `openChat(sessionId, intent)` | Open one retained chat with `PASSIVE`, `EXPLICIT_NAVIGATION`, or `NOTIFICATION` authority. |
 | `joinSession(input)` | Attach to a previously-obtained `StartSessionResponse`. |
 | `endSession(id)` / `endAllSessions()` | Close a single / every session. |
 | `setMute(id, muted)` / `setMuteAll(muted)` | Voice — absolute mute. |
@@ -469,8 +482,11 @@ requires all three ABIs, no `.symtab`, all four continuity JNI exports, and
 | `uploadAttachment(path \| uri \| bytes, fileName, …)` | `suspend`; upload a file (path / `Uri` / `ByteArray` overloads) against the client's widget and return the server-issued `Attachment`. No session required. Reports progress via `onProgress`. |
 | `deleteAttachment(attachmentId)` | `suspend`; cancel an in-flight upload (pass the `uploadId`) or delete a completed attachment (pass `attachment.id`). No session required. |
 | `activeSessions()` | Snapshot of every active session. |
-| `getSessions()` | `GET /sessions` — list prior sessions for the configured `userId`. |
-| `getSession(id)` | `GET /session/<id>` — transcript for one session. |
+| `sessionDirectoryUpdates(policy)` | Finite `Flow`: cached directory then authoritative network directory by default. |
+| `sessionUpdates(id, policy)` | Finite `Flow`: cached transcript then authoritative network transcript by default. |
+| `cachedSession(s)` / `refreshSession(s)` | Explicit suspend cache-only / network-only reads. |
+| `removeCachedSession` / `clearChatCache` / `pruneChatCache` | Suspend cache maintenance scoped to this client. |
+| `OrigonClient.clearAllChatCaches(context)` | Handle-independent cache-root quarantine; close live clients first. |
 | `setAttributes(attributes)` | Replace session-level attributes injected as `data.attributes` on `startSession`. |
 | `OrigonClient.registerForPushNotifications(token)` | Companion. Register an FCM token (buffered until init; latest wins). |
 | `OrigonClient.unregisterForPushNotifications()` | Companion. Remove this device's push registration (e.g. on logout). |
@@ -482,7 +498,7 @@ requires all three ABIs, no `.symtab`, all four continuity JNI exports, and
 
 | Type | Description |
 | --- | --- |
-| `ClientConfig` | endpoint, optional `token`, optional `userId`, attributes (`JsonObject?`). The app is authenticated by its **package name** (`applicationId`), resolved automatically from `context.packageName` (passed to `OrigonClient`) and sent as `X-Bundle-Id` on every HTTPS call (register it first — see [Prerequisites](#prerequisites)). `token` is an optional auth token. `userId` defaults to the random no-backup app-install id when omitted. |
+| `ClientConfig` | endpoint, optional `token`, optional `userId`, attributes, and default-on `chatCachePolicy`. The app package is resolved from `Context`; `userId` defaults to the random no-backup app-install id. |
 | `Channel` | `CHAT`, `VOICE`. |
 | `SessionControl` | `AI`, `USER`. |
 | `MessageRole` | `AI`, `EXTERNAL`, `USER`, `SYSTEM`. |
@@ -501,7 +517,7 @@ requires all three ABIs, no `.symtab`, all four continuity JNI exports, and
 | `Message` | typed transcript line. Carries `id`, `localId`, `role`, `text`, `html`, `userId`, `userName`, `timestamp`, `attachments`, `errorText`, `status`, `state`. |
 | `Attachment` | uploaded-media descriptor: `id`, `name`, `contentType`, `url`, and an optional client-side `localUrl` preview (kept on the local `Message`, stripped from the wire). Returned by `uploadAttachment(...)`, carried on `Message.attachments`, and passed back into `SendMessagePayload.attachments`. |
 | `UploadProgress` | `bytesUploaded`, optional `totalBytes`, optional `percent` (both `null` when the transport reports no content length). Passed to the `uploadAttachment` `onProgress` callback. |
-| `Contact`, `SessionSummary`, `SessionHistory` | typed shapes returned by `getSessions()` / `getSession(id)`. |
+| `SessionSnapshot`, `SessionsSnapshot`, load updates | Cache/network snapshots and typed refresh failures emitted by finite flows. |
 | `SendMessagePayload` | `text`, `html`, `attachments` (input shape for `sendMessage(id, payload)`). |
 
 ## License

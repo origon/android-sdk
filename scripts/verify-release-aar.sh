@@ -43,7 +43,11 @@ for abi in arm64-v8a armeabi-v7a x86_64; do
     [[ "$sections" != *".symtab"* ]] || { echo "ERROR: $abi still contains .symtab"; exit 1; }
 
     symbols="$($nm -D --defined-only "$library")"
-    for export_name in restoreActiveChats openChat registerPush unregisterPush; do
+    for export_name in \
+        restoreActiveChats openChat registerPush unregisterPush \
+        sessionLoaderStart directoryLoaderStart loaderNext loaderCancel loaderFree \
+        removeCachedSession clearChatCache pruneChatCache clearChatCacheRoot \
+        openChatWithIntent; do
         expected="Java_ai_origon_sdk_SessionBridge_${export_name}"
         [[ "$symbols" == *"$expected"* ]] || { echo "ERROR: $abi missing $expected"; exit 1; }
     done
@@ -58,5 +62,5 @@ for abi in arm64-v8a armeabi-v7a x86_64; do
             }
         done <<< "$alignments"
     fi
-    echo "verified $abi: stripped, continuity JNI exports present"
+    echo "verified $abi: stripped, continuity/cache-first JNI exports present"
 done
