@@ -147,7 +147,7 @@ class ChatService(private val manager: SDKManager) {
                     focused = true
                 }
             }
-            runCatching { manager.getSessions() }
+            runCatching { manager.refreshSessions() }
         } catch (e: Throwable) {
             _error.tryEmit("Failed to open session: ${e.message}")
         }
@@ -508,7 +508,7 @@ class ChatService(private val manager: SDKManager) {
             }
             draftPending.value = emptyList()
             if (_currentSessionId.value == null) _currentSessionId.value = newId
-            manager.scope.launch { runCatching { manager.getSessions() } }
+            manager.scope.launch { runCatching { manager.refreshSessions() } }
             newId
         }
     }

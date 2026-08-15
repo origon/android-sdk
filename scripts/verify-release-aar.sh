@@ -46,10 +46,16 @@ for abi in arm64-v8a armeabi-v7a x86_64; do
     for export_name in \
         restoreActiveChats openChat registerPush unregisterPush \
         sessionLoaderStart directoryLoaderStart loaderNext loaderCancel loaderFree \
-        removeCachedSession clearChatCache pruneChatCache clearChatCacheRoot \
-        openChatWithIntent; do
+        removeCachedSession clearChatCache pruneChatCache clearChatCacheRoot; do
         expected="Java_ai_origon_sdk_SessionBridge_${export_name}"
         [[ "$symbols" == *"$expected"* ]] || { echo "ERROR: $abi missing $expected"; exit 1; }
+    done
+    for retired_name in getSessions getSession openChatWithIntent; do
+        retired="Java_ai_origon_sdk_SessionBridge_${retired_name}"
+        [[ "$symbols" != *"$retired"* ]] || {
+            echo "ERROR: $abi still exports retired $retired"
+            exit 1
+        }
     done
 
     if [[ "$abi" != "armeabi-v7a" ]]; then

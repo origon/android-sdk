@@ -135,7 +135,7 @@ fun RootChatScreen(
     // handle and leak the first.
     LaunchedEffect(bootAttempt) {
         if (sdk.isReady.value) {
-            runCatching { sdk.getSessions() }
+            runCatching { sdk.refreshSessions() }
             sdk.chat.openSession(null)
             boot = BootState.Ready
             return@LaunchedEffect
@@ -143,7 +143,7 @@ fun RootChatScreen(
         boot = BootState.Loading
         try {
             sdk.initialize(endpoint = endpoint)
-            runCatching { sdk.getSessions() }
+            runCatching { sdk.refreshSessions() }
             boot = BootState.Ready
             sdk.chat.openSession(null)
         } catch (e: Throwable) {

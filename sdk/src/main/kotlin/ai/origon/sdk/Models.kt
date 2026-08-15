@@ -406,7 +406,7 @@ data class Contact(
     val name: String,
 )
 
-/** Element of the array returned by [OrigonClient.getSessions]. */
+/** Element of a session-directory snapshot. */
 @Serializable
 data class SessionSummary(
     val sessionId: String,
@@ -442,7 +442,7 @@ data class RestoreResult(
     val error: String? = null,
 )
 
-/** Returned by [OrigonClient.getSession]. */
+/** Authoritative transcript history carried by a session snapshot. */
 @Serializable
 data class SessionHistory(
     val history: List<Message> = emptyList(),

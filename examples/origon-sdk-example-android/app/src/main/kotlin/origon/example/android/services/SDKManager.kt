@@ -31,7 +31,7 @@ import kotlinx.coroutines.withContext
  *
  * - Hold the [OrigonClient] handle.
  * - Own [CallService] and [ChatService] and expose them as `call` / `chat`.
- * - Host the shared session list and the [getSessions] read.
+ * - Host the shared session list and the [refreshSessions] finite directory load.
  * - Drain the SDK's event queue on a 50 ms loop and broadcast every
  *   [ClientEvent] through [events]. Consumers filter by `sessionId`.
  * - Tear down cleanly on "change endpoint" so the native handle is released.
@@ -91,7 +91,7 @@ class SDKManager(private val appContext: Context) {
     // MARK: - Sessions (shared between call and chat)
 
     /** Refresh the cached session list from the SDK (used by the sidebar). */
-    suspend fun getSessions() {
+    suspend fun refreshSessions() {
         val c = client ?: return
         c.sessionDirectoryUpdates().collect { update ->
             when (update) {

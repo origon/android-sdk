@@ -121,38 +121,6 @@ class OrigonClient(
         withHandle { SessionBridge.setAttributes(it, json) }
     }
 
-    // ── Session history ──────────────────────────────────────────────
-
-    /** `GET /sessions` — prior sessions for the configured `userId`. */
-    fun getSessions(): List<SessionSummary> {
-        val body = withHandle(SessionBridge::getSessions)
-        return try {
-            JSON.decodeFromString(body)
-        } catch (e: Throwable) {
-            throw SessionException(
-                kind = SessionBridge.ERROR_OTHER,
-                statusCode = 0,
-                code = null,
-                message = "decode getSessions: ${e.message}",
-            )
-        }
-    }
-
-    /** `GET /session/<id>` — history for one session. */
-    fun getSession(id: String): SessionHistory {
-        val body = withHandle { SessionBridge.getSession(it, id) }
-        return try {
-            JSON.decodeFromString(body)
-        } catch (e: Throwable) {
-            throw SessionException(
-                kind = SessionBridge.ERROR_OTHER,
-                statusCode = 0,
-                code = null,
-                message = "decode getSession: ${e.message}",
-            )
-        }
-    }
-
     /** Finite cache/network transcript load. At most cache then network is emitted. */
     fun sessionUpdates(
         id: String,
@@ -338,16 +306,10 @@ class OrigonClient(
         }
     }
 
-    /** Explicit history/push open. Background restore must use restoreActiveChats. */
-    fun openChat(sessionId: String, takeover: Boolean): StartSessionResponse {
-        val result = withHandle { SessionBridge.openChat(it, sessionId, takeover) }
-        return StartSessionResponse(result.sessionId, result.url, result.token)
-    }
-
     /** Attach using named authority; notification and navigation are explicit takeover intents. */
     fun openChat(sessionId: String, intent: ChatAccessIntent): StartSessionResponse {
         val result = withHandle {
-            SessionBridge.openChatWithIntent(it, sessionId, intent.toBridge())
+            SessionBridge.openChat(it, sessionId, intent.toBridge())
         }
         return StartSessionResponse(result.sessionId, result.url, result.token)
     }

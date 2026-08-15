@@ -83,14 +83,6 @@ internal object SessionBridge {
     @JvmStatic external fun isCallEnabled(handle: Long): Boolean
     @JvmStatic external fun getAttachmentPolicy(handle: Long): AttachmentPolicy
 
-    // ── Session history fetchers ─────────────────────────────────────
-
-    /** `GET /sessions`. Returns the response body as a JSON string. */
-    @JvmStatic external fun getSessions(handle: Long): String
-
-    /** `GET /session/<id>`. Returns the response body as a JSON string. */
-    @JvmStatic external fun getSession(handle: Long, id: String): String
-
     // ── Finite cache/network loaders ─────────────────────────────────
 
     @JvmStatic external fun sessionLoaderStart(handle: Long, id: String, policy: Int): Long
@@ -141,14 +133,8 @@ internal object SessionBridge {
     /** Passive, newest-first retained-chat restore with per-id outcomes. */
     @JvmStatic external fun restoreActiveChats(handle: Long): Array<ai.origon.sdk.bridge.RestoreResult>
 
-    /** Explicit retained-chat open. takeover is true only for user intent. */
+    /** Retained-chat open with named authority. */
     @JvmStatic external fun openChat(
-        handle: Long,
-        sessionId: String,
-        takeover: Boolean,
-    ): StartSessionResponse
-
-    @JvmStatic external fun openChatWithIntent(
         handle: Long,
         sessionId: String,
         intent: Int,
