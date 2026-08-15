@@ -7,6 +7,9 @@
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
     <!-- Photo/video attachment picking. READ_MEDIA_* are the Android 13+
          (API 33) permissions; READ_EXTERNAL_STORAGE covers API 26-32. -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
