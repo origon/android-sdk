@@ -2,6 +2,7 @@ package ai.origon.sdk
 
 import android.util.Log
 import java.lang.ref.WeakReference
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 
 /**
@@ -27,6 +28,8 @@ internal object PushRegistrar {
     /** Latest token awaiting (re-)send, retained so a client created after the
      *  token arrives can still register. */
     private var bufferedToken: String? = null
+    private var authoritySuspended: Boolean = false
+    private var authorityEpoch: Long = 0
 
     // ── Client lifecycle (called by OrigonClient) ────────────────────
 
@@ -35,7 +38,9 @@ internal object PushRegistrar {
         val token: String?
         synchronized(lock) {
             this.client = WeakReference(client)
-            token = bufferedToken
+            authoritySuspended = false
+            authorityEpoch += 1
+            token = bufferedToken ?: PushAuthorityStore.load(client.appContext)?.token
         }
         if (token != null) {
             sendRegister(client, token)
@@ -56,6 +61,10 @@ internal object PushRegistrar {
     fun register(token: String) {
         val target: OrigonClient?
         synchronized(lock) {
+            if (authoritySuspended) {
+                Log.d(TAG, "push authority suspended; dropping token callback")
+                return
+            }
             bufferedToken = token
             target = client?.get()
         }
@@ -69,29 +78,87 @@ internal object PushRegistrar {
     fun unregister() {
         val target: OrigonClient?
         synchronized(lock) {
+            authoritySuspended = true
+            authorityEpoch += 1
             bufferedToken = null
             target = client?.get()
         }
         if (target == null) {
-            Log.d(TAG, "no active client; nothing to unregister")
+            Log.d(TAG, "no active client; retaining any logout retry state")
             return
         }
         executor.execute {
             try {
-                target.unregisterPush()
+                val registration = PushAuthorityStore.load(target.appContext)
+                if (registration == null) {
+                    Log.d(TAG, "no persisted push registration; nothing to unregister")
+                    return@execute
+                }
+                target.unregisterPush(
+                    token = registration.token,
+                    provider = "fcm",
+                    generation = registration.generation,
+                )
+                PushAuthorityStore.clear(target.appContext)
             } catch (e: Throwable) {
                 Log.e(TAG, "unregisterForPushNotifications failed", e)
             }
         }
     }
 
+    /** Ordered logout gate for a host that will close the client immediately. */
+    fun unregisterBlocking(target: OrigonClient) {
+        synchronized(lock) {
+            authoritySuspended = true
+            authorityEpoch += 1
+            bufferedToken = null
+        }
+        val future = executor.submit {
+            val registration = PushAuthorityStore.load(target.appContext) ?: return@submit
+            try {
+                target.unregisterPush(
+                    token = registration.token,
+                    provider = "fcm",
+                    generation = registration.generation,
+                )
+            } finally {
+                PushAuthorityStore.clear(target.appContext)
+            }
+        }
+        try {
+            future.get()
+        } catch (error: ExecutionException) {
+            throw error.cause ?: error
+        }
+    }
+
     private fun sendRegister(client: OrigonClient, token: String) {
+        val epoch = synchronized(lock) { authorityEpoch }
         executor.execute {
             try {
-                client.registerPush(token = token, provider = "fcm", environment = null)
+                val generation = client.registerPush(
+                    token = token,
+                    provider = "fcm",
+                    environment = null,
+                )
+                val mayPersist = synchronized(lock) {
+                    !authoritySuspended && authorityEpoch == epoch && this.client?.get() === client
+                }
+                if (mayPersist) {
+                    PushAuthorityStore.save(client.appContext, PushRegistration(token, generation))
+                }
             } catch (e: Throwable) {
                 Log.e(TAG, "registerForPushNotifications failed", e)
             }
         }
+    }
+
+    fun clearAuthority(context: android.content.Context) {
+        synchronized(lock) {
+            authoritySuspended = true
+            authorityEpoch += 1
+            bufferedToken = null
+        }
+        PushAuthorityStore.clear(context.applicationContext)
     }
 }

@@ -2,8 +2,13 @@ package ai.origon.sdk
 
 import ai.origon.sdk.bridge.SessionEvent
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -23,37 +28,31 @@ class OrigonClient(
     config: ClientConfig,
 ) : AutoCloseable {
 
-    private val appContext: android.content.Context = context.applicationContext
+    internal val appContext: android.content.Context = context.applicationContext
 
     /**
-     * Stable per-install device identifier (`Settings.Secure.ANDROID_ID`).
-     * Sent as `deviceId` on push register/unregister, and used as the
-     * `userId` fallback when the consumer omits one.
+     * Random app-install UUID under no-backup storage. Never hardware-derived.
      */
-    private val deviceId: String? = resolveDeviceId(appContext)
+    private val installationId: String = InstallationIdentity.loadOrCreate(appContext)
 
-    private val handle: Long = SessionBridge.initialize(
+    private val cacheRoot = config.chatCachePolicy
+        .takeIf { it == ChatCachePolicy.ENABLED }
+        ?.let { ChatCacheStorage.ensureRoot(appContext) }
+    private val rawHandle: Long = SessionBridge.initialize(
         endpoint = config.endpoint,
         bundleId = appContext.packageName,
         token = config.token,
-        // `userId` is optional at the SDK surface but required by the
-        // core. Fall back to the device id so anonymous users still get
-        // a stable identity; fail fast if neither is available.
-        userId = config.userId ?: deviceId ?: throw SessionException(
-            kind = SessionBridge.ERROR_MISSING_FIELD,
-            statusCode = 0,
-            code = "user_id",
-            message = "userId was not provided and no device identifier is available",
-        ),
-        deviceId = deviceId,
+        userId = config.userId ?: installationId,
+        installationId = installationId,
         attributesJson = config.attributes?.let { JSON.encodeToString(JsonObject.serializer(), it) },
+        cacheDir = cacheRoot?.absolutePath,
     )
-    private val closed = AtomicBoolean(false)
+    private val nativeGate = NativeHandleGate(rawHandle)
 
     init {
         // SessionBridge.initialize throws SessionException on failure;
         // a zero handle without an exception would be a bridge bug.
-        if (handle == 0L) {
+        if (rawHandle == 0L) {
             throw SessionException(
                 kind = SessionBridge.ERROR_OTHER,
                 statusCode = 0,
@@ -67,58 +66,36 @@ class OrigonClient(
     }
 
     override fun close() {
-        if (closed.compareAndSet(false, true)) {
-            // Detach first so the registrar won't start a new
-            // registration against a handle we're about to destroy.
-            PushRegistrar.detach(this)
-            SessionBridge.destroy(handle)
-        }
+        nativeGate.closeOnce(
+            beforeDestroy = {
+                PushRegistrar.detach(this)
+            },
+            destroy = SessionBridge::destroy,
+        )
     }
 
-    private fun ensureOpen() {
-        if (closed.get()) {
-            throw SessionException(
-                kind = SessionBridge.ERROR_NOT_INITIALIZED,
-                statusCode = 0,
-                code = null,
-                message = "client has been closed",
-            )
-        }
-    }
+    private fun <T> withHandle(block: (Long) -> T): T = nativeGate.withHandle(block)
 
     // ── Cached /config getters ───────────────────────────────────────
 
     /** Pre-populated first assistant message configured for the tenant. */
     val startMessage: String
-        get() {
-            ensureOpen()
-            return SessionBridge.getStartMessage(handle)
-        }
+        get() = withHandle(SessionBridge::getStartMessage)
 
     val isChatEnabled: Boolean
-        get() {
-            ensureOpen()
-            return SessionBridge.isChatEnabled(handle)
-        }
+        get() = withHandle(SessionBridge::isChatEnabled)
 
     val isCallEnabled: Boolean
-        get() {
-            ensureOpen()
-            return SessionBridge.isCallEnabled(handle)
-        }
+        get() = withHandle(SessionBridge::isCallEnabled)
 
     /** True when chat and voice may share one session. */
     val multipleChannels: Boolean
-        get() {
-            ensureOpen()
-            return SessionBridge.isMultipleChannelsAllowed(handle)
-        }
+        get() = withHandle(SessionBridge::isMultipleChannelsAllowed)
 
     val attachmentPolicy: AttachmentPolicy
-        get() {
-            ensureOpen()
+        get() = withHandle { handle ->
             val raw = SessionBridge.getAttachmentPolicy(handle)
-            return AttachmentPolicy(
+            AttachmentPolicy(
                 images = AttachmentRule(raw.images.enabled, raw.images.maxSize),
                 documents = AttachmentRule(raw.documents.enabled, raw.documents.maxSize),
                 videos = AttachmentRule(raw.videos.enabled, raw.videos.maxSize),
@@ -140,43 +117,130 @@ class OrigonClient(
      * subsequent [startCall] / [startChat] calls. Pass null to clear.
      */
     fun setAttributes(attributes: JsonObject?) {
-        ensureOpen()
         val json = attributes?.let { JSON.encodeToString(JsonObject.serializer(), it) }
-        SessionBridge.setAttributes(handle, json)
+        withHandle { SessionBridge.setAttributes(it, json) }
     }
 
-    // ── Session history ──────────────────────────────────────────────
+    /** Finite cache/network transcript load. At most cache then network is emitted. */
+    fun sessionUpdates(
+        id: String,
+        policy: SessionLoadPolicy = SessionLoadPolicy.CACHE_THEN_NETWORK,
+    ): Flow<SessionLoadUpdate> = loaderFlow(
+        start = { handle -> SessionBridge.sessionLoaderStart(handle, id, policy.toBridge()) },
+        decode = { result ->
+            when (result.status) {
+                SessionBridge.LOADER_UPDATE -> SessionLoadUpdate.Snapshot(
+                    JSON.decodeFromString(SessionSnapshot.serializer(), result.payloadJson.orEmpty()),
+                )
+                SessionBridge.LOADER_ERROR -> SessionLoadUpdate.RefreshFailed(
+                    result.toSessionException(),
+                    result.cachedSnapshotEmitted,
+                )
+                else -> null
+            }
+        },
+    )
 
-    /** `GET /sessions` — prior sessions for the configured `userId`. */
-    fun getSessions(): List<SessionSummary> {
-        ensureOpen()
-        val body = SessionBridge.getSessions(handle)
-        return try {
-            JSON.decodeFromString(body)
-        } catch (e: Throwable) {
-            throw SessionException(
-                kind = SessionBridge.ERROR_OTHER,
-                statusCode = 0,
-                code = null,
-                message = "decode getSessions: ${e.message}",
-            )
-        }
+    /** Finite cache/network directory load. At most cache then network is emitted. */
+    fun sessionDirectoryUpdates(
+        policy: SessionLoadPolicy = SessionLoadPolicy.CACHE_THEN_NETWORK,
+    ): Flow<SessionsLoadUpdate> = loaderFlow(
+        start = { handle -> SessionBridge.directoryLoaderStart(handle, policy.toBridge()) },
+        decode = { result ->
+            when (result.status) {
+                SessionBridge.LOADER_UPDATE -> SessionsLoadUpdate.Snapshot(
+                    JSON.decodeFromString(SessionsSnapshot.serializer(), result.payloadJson.orEmpty()),
+                )
+                SessionBridge.LOADER_ERROR -> SessionsLoadUpdate.RefreshFailed(
+                    result.toSessionException(),
+                    result.cachedSnapshotEmitted,
+                )
+                else -> null
+            }
+        },
+    )
+
+    suspend fun cachedSession(id: String): SessionSnapshot? =
+        sessionUpdates(id, SessionLoadPolicy.CACHE_ONLY).firstOrNull()
+            ?.let { update ->
+                when (update) {
+                    is SessionLoadUpdate.Snapshot -> update.value
+                    is SessionLoadUpdate.RefreshFailed -> throw update.error
+                }
+            }
+
+    suspend fun refreshSession(id: String): SessionSnapshot =
+        requireSessionSnapshot(sessionUpdates(id, SessionLoadPolicy.NETWORK_ONLY).firstOrNull())
+
+    suspend fun cachedSessions(): SessionsSnapshot? =
+        sessionDirectoryUpdates(SessionLoadPolicy.CACHE_ONLY).firstOrNull()
+            ?.let { update ->
+                when (update) {
+                    is SessionsLoadUpdate.Snapshot -> update.value
+                    is SessionsLoadUpdate.RefreshFailed -> throw update.error
+                }
+            }
+
+    suspend fun refreshSessions(): SessionsSnapshot =
+        requireSessionsSnapshot(
+            sessionDirectoryUpdates(SessionLoadPolicy.NETWORK_ONLY).firstOrNull(),
+        )
+
+    suspend fun removeCachedSession(id: String) = withContext(Dispatchers.IO) {
+        withHandle { SessionBridge.removeCachedSession(it, id) }
     }
 
-    /** `GET /session/<id>` — history for one session. */
-    fun getSession(id: String): SessionHistory {
-        ensureOpen()
-        val body = SessionBridge.getSession(handle, id)
-        return try {
-            JSON.decodeFromString(body)
-        } catch (e: Throwable) {
-            throw SessionException(
-                kind = SessionBridge.ERROR_OTHER,
-                statusCode = 0,
-                code = null,
-                message = "decode getSession: ${e.message}",
-            )
+    suspend fun clearChatCache() = withContext(Dispatchers.IO) {
+        withHandle(SessionBridge::clearChatCache)
+    }
+
+    suspend fun pruneChatCache() = withContext(Dispatchers.IO) {
+        withHandle(SessionBridge::pruneChatCache)
+    }
+
+    private fun <T> loaderFlow(
+        start: (Long) -> Long,
+        decode: (ai.origon.sdk.bridge.SessionLoaderResult) -> T?,
+    ): Flow<T> = callbackFlow {
+        val loader = withHandle(start)
+        check(loader != 0L) { "session bridge returned null loader" }
+        val owner = NativeLoaderOwner(loader)
+        val worker = launch(Dispatchers.IO) {
+            try {
+                while (true) {
+                    val result = SessionBridge.loaderNext(loader)
+                    if (result.status == SessionBridge.LOADER_END ||
+                        result.status == SessionBridge.LOADER_CANCELLED
+                    ) {
+                        close()
+                        break
+                    }
+                    val update = decode(result)
+                    if (update != null && trySend(update).isFailure) break
+                }
+            } finally {
+                owner.freeAfterNext()
+            }
         }
+        awaitClose {
+            owner.cancelOnce()
+            worker.cancel()
+        }
+    }.buffer(capacity = 2)
+
+    private fun ai.origon.sdk.bridge.SessionLoaderResult.toSessionException() =
+        SessionException(errorKind, errorStatusCode, errorCode, errorMessage)
+
+    private fun requireSessionSnapshot(update: SessionLoadUpdate?): SessionSnapshot = when (update) {
+        is SessionLoadUpdate.Snapshot -> update.value
+        is SessionLoadUpdate.RefreshFailed -> throw update.error
+        null -> throw SessionException(SessionBridge.ERROR_OTHER, 0, null, "session loader ended without a snapshot")
+    }
+
+    private fun requireSessionsSnapshot(update: SessionsLoadUpdate?): SessionsSnapshot = when (update) {
+        is SessionsLoadUpdate.Snapshot -> update.value
+        is SessionsLoadUpdate.RefreshFailed -> throw update.error
+        null -> throw SessionException(SessionBridge.ERROR_OTHER, 0, null, "directory loader ended without a snapshot")
     }
 
     // ── Session lifecycle ────────────────────────────────────────────
@@ -194,12 +258,9 @@ class OrigonClient(
      * for the `/session/start` HTTP failure or a malformed request.
      */
     fun startCall(options: StartCallOptions): StartSessionResponse {
-        ensureOpen()
-        val raw = SessionBridge.startCall(
-            handle = handle,
-            sessionId = options.sessionId,
-            dataJson = options.data,
-        )
+        val raw = withHandle { handle ->
+            SessionBridge.startCall(handle, options.sessionId, options.data)
+        }
         return StartSessionResponse(
             sessionId = raw.sessionId,
             url = raw.url,
@@ -222,20 +283,35 @@ class OrigonClient(
      * composer on a dead conversation.
      */
     fun startChat(options: StartChatOptions): StartSessionResponse {
-        ensureOpen()
         val firstJson =
             JSON.encodeToString(SendMessagePayload.serializer(), options.firstMessage)
-        val raw = SessionBridge.startChat(
-            handle = handle,
-            firstMessageJson = firstJson,
-            sessionId = options.sessionId,
-            dataJson = options.data,
-        )
+        val raw = withHandle { handle ->
+            SessionBridge.startChat(handle, firstJson, options.sessionId, options.data)
+        }
         return StartSessionResponse(
             sessionId = raw.sessionId,
             url = raw.url,
             token = raw.token,
         )
+    }
+
+    /** Passively attach retained active chats without replacing another install. */
+    fun restoreActiveChats(): List<RestoreResult> {
+        return withHandle(SessionBridge::restoreActiveChats).map { result ->
+            RestoreResult(
+                sessionId = result.sessionId,
+                status = restoreStatus(result.status),
+                error = result.error,
+            )
+        }
+    }
+
+    /** Attach using named authority; notification and navigation are explicit takeover intents. */
+    fun openChat(sessionId: String, intent: ChatAccessIntent): StartSessionResponse {
+        val result = withHandle {
+            SessionBridge.openChat(it, sessionId, intent.toBridge())
+        }
+        return StartSessionResponse(result.sessionId, result.url, result.token)
     }
 
     /**
@@ -247,13 +323,7 @@ class OrigonClient(
      * event.
      */
     fun joinCall(input: JoinInput) {
-        ensureOpen()
-        SessionBridge.joinCall(
-            handle = handle,
-            sessionId = input.sessionId,
-            url = input.url,
-            token = input.token,
-        )
+        withHandle { SessionBridge.joinCall(it, input.sessionId, input.url, input.token) }
     }
 
     /**
@@ -266,23 +336,21 @@ class OrigonClient(
      * there is no deadline left to race.
      */
     fun joinChat(input: JoinInput) {
-        ensureOpen()
-        SessionBridge.joinChat(
-            handle = handle,
-            sessionId = input.sessionId,
-            url = input.url,
-            token = input.token,
-        )
+        withHandle { SessionBridge.joinChat(it, input.sessionId, input.url, input.token) }
     }
 
     fun endSession(id: String) {
-        ensureOpen()
-        SessionBridge.endSession(handle, id)
+        withHandle { SessionBridge.endSession(it, id) }
     }
 
     fun endAllSessions() {
-        ensureOpen()
-        SessionBridge.endAllSessions(handle)
+        withHandle(SessionBridge::endAllSessions)
+    }
+
+    /** Generation-bound logout gate. Completes before returning so [close] is safe next. */
+    fun unregisterForPushNotifications() {
+        withHandle { }
+        PushRegistrar.unregisterBlocking(this)
     }
 
     // ── Push notifications ───────────────────────────────────────────
@@ -291,21 +359,18 @@ class OrigonClient(
     // These instance methods are the blocking JNI calls they dispatch to.
 
     /** Blocking JNI call — invoked off the main thread by [PushRegistrar]. */
-    internal fun registerPush(token: String, provider: String, environment: String?) {
-        ensureOpen()
-        SessionBridge.registerPush(handle, token, provider, environment)
+    internal fun registerPush(token: String, provider: String, environment: String?): String {
+        return withHandle { SessionBridge.registerPush(it, token, provider, environment) }
     }
 
     /** Blocking JNI call — invoked off the main thread by [PushRegistrar]. */
-    internal fun unregisterPush() {
-        ensureOpen()
-        SessionBridge.unregisterPush(handle)
+    internal fun unregisterPush(token: String, provider: String, generation: String) {
+        withHandle { SessionBridge.unregisterPush(it, token, provider, null, generation) }
     }
 
     /** Snapshot of every active session. */
     fun activeSessions(): List<ActiveSession> {
-        ensureOpen()
-        val raw = SessionBridge.activeSessionIds(handle)
+        val raw = withHandle(SessionBridge::activeSessionIds)
         return raw.map { row ->
             ActiveSession(sessionId = row[0], channel = Channel.fromWire(row[1]))
         }
@@ -314,13 +379,11 @@ class OrigonClient(
     // ── Voice controls ───────────────────────────────────────────────
 
     fun setMute(id: String, muted: Boolean) {
-        ensureOpen()
-        SessionBridge.setMute(handle, id, muted)
+        withHandle { SessionBridge.setMute(it, id, muted) }
     }
 
     fun setMuteAll(muted: Boolean) {
-        ensureOpen()
-        SessionBridge.setMuteAll(handle, muted)
+        withHandle { SessionBridge.setMuteAll(it, muted) }
     }
 
     /**
@@ -335,8 +398,7 @@ class OrigonClient(
      * thread.
      */
     fun setAudioOutput(route: AudioOutputRoute) {
-        ensureOpen()
-        SessionBridge.setAudioOutput(handle, route.toBridge())
+        withHandle { SessionBridge.setAudioOutput(it, route.toBridge()) }
     }
 
     // ── Chat ─────────────────────────────────────────────────────────
@@ -351,9 +413,8 @@ class OrigonClient(
      * surface on [pollEvent]. Returns the server-issued [Message].
      */
     fun sendMessage(id: String, payload: SendMessagePayload): Message {
-        ensureOpen()
         val payloadJson = JSON.encodeToString(SendMessagePayload.serializer(), payload)
-        val responseJson = SessionBridge.sendMessage(handle, id, payloadJson)
+        val responseJson = withHandle { SessionBridge.sendMessage(it, id, payloadJson) }
         return JSON.decodeFromString(Message.serializer(), responseJson)
     }
 
@@ -364,8 +425,7 @@ class OrigonClient(
      * typing burst.
      */
     fun notifyTyping(id: String) {
-        ensureOpen()
-        SessionBridge.notifyTyping(handle, id)
+        withHandle { SessionBridge.notifyTyping(it, id) }
     }
 
     /**
@@ -375,8 +435,7 @@ class OrigonClient(
      * and on [endSession].
      */
     fun stopTyping(id: String) {
-        ensureOpen()
-        SessionBridge.stopTyping(handle, id)
+        withHandle { SessionBridge.stopTyping(it, id) }
     }
 
     // ── Attachments ──────────────────────────────────────────────────
@@ -412,7 +471,6 @@ class OrigonClient(
         uploadId: String = UUID.randomUUID().toString(),
         onProgress: ((UploadProgress) -> Unit)? = null,
     ): Attachment {
-        ensureOpen()
         val callback = onProgress?.let { cb ->
             UploadProgressCallback { uploaded, total ->
                 val totalOpt: Long? = if (total < 0) null else total
@@ -423,13 +481,9 @@ class OrigonClient(
             }
         }
         val json = withContext(Dispatchers.IO) {
-            SessionBridge.uploadAttachment(
-                handle,
-                uploadId,
-                path,
-                fileName,
-                callback,
-            )
+            withHandle { handle ->
+                SessionBridge.uploadAttachment(handle, uploadId, path, fileName, callback)
+            }
         }
         return JSON.decodeFromString(Attachment.serializer(), json)
     }
@@ -446,7 +500,7 @@ class OrigonClient(
         uploadId: String = UUID.randomUUID().toString(),
         onProgress: ((UploadProgress) -> Unit)? = null,
     ): Attachment {
-        ensureOpen()
+        withHandle { }
         val tempFile = withContext(Dispatchers.IO) {
             val ext = fileName.substringAfterLast('.', missingDelimiterValue = "")
             val suffix = if (ext.isEmpty()) "" else ".$ext"
@@ -483,7 +537,7 @@ class OrigonClient(
         uploadId: String = UUID.randomUUID().toString(),
         onProgress: ((UploadProgress) -> Unit)? = null,
     ): Attachment {
-        ensureOpen()
+        withHandle { }
         val tempFile = withContext(Dispatchers.IO) {
             val ext = fileName.substringAfterLast('.', missingDelimiterValue = "")
             val suffix = if (ext.isEmpty()) "" else ".$ext"
@@ -521,9 +575,8 @@ class OrigonClient(
      * not form a usable path is refused by the SDK before any request.
      */
     suspend fun deleteAttachment(attachmentId: String) {
-        ensureOpen()
         withContext(Dispatchers.IO) {
-            SessionBridge.deleteAttachment(handle, attachmentId)
+            withHandle { SessionBridge.deleteAttachment(it, attachmentId) }
         }
     }
 
@@ -531,8 +584,7 @@ class OrigonClient(
 
     /** Polls the next event. Returns null when the queue is idle. */
     fun pollEvent(): ClientEvent? {
-        ensureOpen()
-        val raw = SessionBridge.pollEvent(handle) ?: return null
+        val raw = withHandle(SessionBridge::pollEvent) ?: return null
         return mapEvent(raw)
     }
 
@@ -650,6 +702,17 @@ class OrigonClient(
 
     companion object {
         /**
+         * Synchronously quarantines the SDK-owned cache subtree. Close every live
+         * client before calling; physical deletion may finish asynchronously.
+         */
+        suspend fun clearAllChatCaches(context: android.content.Context) {
+            val root = ChatCacheStorage.ensureRoot(context) ?: return
+            withContext(Dispatchers.IO) {
+                SessionBridge.clearChatCacheRoot(root.absolutePath)
+            }
+        }
+
+        /**
          * Install the global tracing subscriber. Idempotent — only the
          * first call installs; subsequent calls are no-ops.
          *
@@ -685,23 +748,6 @@ class OrigonClient(
         fun unregisterForPushNotifications() {
             PushRegistrar.unregister()
         }
-
-        /**
-         * Resolve a stable per-install device id from
-         * `Settings.Secure.ANDROID_ID`. Returns null on the rare devices
-         * that report a blank id, which disables push registration and,
-         * when no `userId` is supplied, surfaces as an init error.
-         */
-        @android.annotation.SuppressLint("HardwareIds")
-        private fun resolveDeviceId(context: android.content.Context): String? =
-            try {
-                android.provider.Settings.Secure.getString(
-                    context.contentResolver,
-                    android.provider.Settings.Secure.ANDROID_ID,
-                )?.takeIf { it.isNotEmpty() }
-            } catch (_: Throwable) {
-                null
-            }
 
         private val JSON = Json { ignoreUnknownKeys = true }
     }

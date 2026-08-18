@@ -12,6 +12,11 @@ android {
     // ships. compileSdk only selects which APIs compile; targetSdk is the
     // runtime-behaviour opt-in, and 36 is Play's floor.
     compileSdk = 37
+    // Match the SDK artifact build. Without an explicit pin this independent
+    // example project lets AGP select a different/default NDK and its strip
+    // tasks retain prebuilt native libraries behind an "Unable to strip"
+    // warning.
+    ndkVersion = "27.2.12479018"
 
     defaultConfig {
         applicationId = "origon.example.android"
@@ -56,7 +61,7 @@ android {
 }
 
 dependencies {
-    implementation("ai.origon:sdk:0.2.0")
+    implementation("ai.origon:sdk:0.0.0-LOCAL")
     // ClientConfig exposes a kotlinx JsonObject in its public API but the
     // SDK declares the dependency as `implementation`, so consumers must
     // add it explicitly to satisfy the compiler.

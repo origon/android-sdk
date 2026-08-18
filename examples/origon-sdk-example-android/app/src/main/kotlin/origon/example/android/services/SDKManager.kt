@@ -5,6 +5,7 @@ import ai.origon.sdk.ClientConfig
 import ai.origon.sdk.ClientEvent
 import ai.origon.sdk.OrigonClient
 import ai.origon.sdk.SessionSummary
+import ai.origon.sdk.SessionsLoadUpdate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -29,7 +31,7 @@ import kotlinx.coroutines.withContext
  *
  * - Hold the [OrigonClient] handle.
  * - Own [CallService] and [ChatService] and expose them as `call` / `chat`.
- * - Host the shared session list and the [getSessions] read.
+ * - Host the shared session list and the [refreshSessions] finite directory load.
  * - Drain the SDK's event queue on a 50 ms loop and broadcast every
  *   [ClientEvent] through [events]. Consumers filter by `sessionId`.
  * - Tear down cleanly on "change endpoint" so the native handle is released.
@@ -89,10 +91,14 @@ class SDKManager(private val appContext: Context) {
     // MARK: - Sessions (shared between call and chat)
 
     /** Refresh the cached session list from the SDK (used by the sidebar). */
-    suspend fun getSessions() {
+    suspend fun refreshSessions() {
         val c = client ?: return
-        val result = withContext(Dispatchers.IO) { c.getSessions() }
-        _sessions.value = result
+        c.sessionDirectoryUpdates().collect { update ->
+            when (update) {
+                is SessionsLoadUpdate.Snapshot -> _sessions.value = update.value.sessions
+                is SessionsLoadUpdate.RefreshFailed -> throw update.error
+            }
+        }
     }
 
     // MARK: - Event polling

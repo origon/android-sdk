@@ -6,7 +6,8 @@
 # Prerequisites (one-time):
 #   brew install openjdk@21
 #   brew install --cask android-commandlinetools
-#   sdkmanager "platform-tools" "build-tools;37.0.0" "platforms;android-37"
+#   sdkmanager "platform-tools" "build-tools;37.0.0" "platforms;android-37" \
+#       "ndk;27.2.12479018"
 #   # for --emulator: also install the emulator + an arm64 system image, e.g.
 #   sdkmanager "emulator" "system-images;android-36;google_apis;arm64-v8a"
 #   avdmanager create avd -n Origon_API36 \

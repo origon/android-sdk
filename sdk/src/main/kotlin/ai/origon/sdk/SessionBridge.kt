@@ -2,6 +2,7 @@ package ai.origon.sdk
 
 import ai.origon.sdk.bridge.AttachmentPolicy
 import ai.origon.sdk.bridge.SessionEvent
+import ai.origon.sdk.bridge.SessionLoaderResult
 import ai.origon.sdk.bridge.StartSessionResponse
 
 /**
@@ -61,8 +62,9 @@ internal object SessionBridge {
         bundleId: String?,
         token: String?,
         userId: String?,
-        deviceId: String?,
+        installationId: String?,
         attributesJson: String?,
+        cacheDir: String?,
     ): Long
 
     @JvmStatic external fun destroy(handle: Long)
@@ -81,13 +83,17 @@ internal object SessionBridge {
     @JvmStatic external fun isCallEnabled(handle: Long): Boolean
     @JvmStatic external fun getAttachmentPolicy(handle: Long): AttachmentPolicy
 
-    // ── Session history fetchers ─────────────────────────────────────
+    // ── Finite cache/network loaders ─────────────────────────────────
 
-    /** `GET /sessions`. Returns the response body as a JSON string. */
-    @JvmStatic external fun getSessions(handle: Long): String
-
-    /** `GET /session/<id>`. Returns the response body as a JSON string. */
-    @JvmStatic external fun getSession(handle: Long, id: String): String
+    @JvmStatic external fun sessionLoaderStart(handle: Long, id: String, policy: Int): Long
+    @JvmStatic external fun directoryLoaderStart(handle: Long, policy: Int): Long
+    @JvmStatic external fun loaderNext(loader: Long): SessionLoaderResult
+    @JvmStatic external fun loaderCancel(loader: Long)
+    @JvmStatic external fun loaderFree(loader: Long)
+    @JvmStatic external fun removeCachedSession(handle: Long, id: String)
+    @JvmStatic external fun clearChatCache(handle: Long)
+    @JvmStatic external fun pruneChatCache(handle: Long)
+    @JvmStatic external fun clearChatCacheRoot(cacheRoot: String)
 
     // ── Per-session lifecycle ────────────────────────────────────────
 
@@ -124,6 +130,16 @@ internal object SessionBridge {
         dataJson: String?,
     ): StartSessionResponse
 
+    /** Passive, newest-first retained-chat restore with per-id outcomes. */
+    @JvmStatic external fun restoreActiveChats(handle: Long): Array<ai.origon.sdk.bridge.RestoreResult>
+
+    /** Retained-chat open with named authority. */
+    @JvmStatic external fun openChat(
+        handle: Long,
+        sessionId: String,
+        intent: Int,
+    ): StartSessionResponse
+
     /**
      * Attach to a session whose start-session response was obtained out
      * of band (multi-device handoff, deeplink, persisted session).
@@ -157,17 +173,23 @@ internal object SessionBridge {
     /**
      * `POST /push/register`. [token] is the FCM token; [provider] is
      * `"fcm"`; [environment] is unused for FCM and passed as null.
-     * No-ops when the client was created without a device id.
+     * Returns the opaque endpoint generation.
      */
     @JvmStatic external fun registerPush(
         handle: Long,
         token: String,
         provider: String,
         environment: String?,
-    )
+    ): String
 
-    /** `POST /push/unregister`. No-ops when there is no device id. */
-    @JvmStatic external fun unregisterPush(handle: Long)
+    /** Generation-bound `POST /push/unregister`. */
+    @JvmStatic external fun unregisterPush(
+        handle: Long,
+        token: String,
+        provider: String,
+        environment: String?,
+        generation: String,
+    )
 
     // ── Voice controls ───────────────────────────────────────────────
 
@@ -284,6 +306,17 @@ internal object SessionBridge {
     // SessionControl — value of SessionEvent.control on CONTROL_UPDATED.
     const val CONTROL_AI = 0
     const val CONTROL_USER = 1
+
+    const val LOAD_CACHE_THEN_NETWORK = 0
+    const val LOAD_NETWORK_ONLY = 1
+    const val LOAD_CACHE_ONLY = 2
+    const val LOADER_UPDATE = 1
+    const val LOADER_END = 2
+    const val LOADER_ERROR = 3
+    const val LOADER_CANCELLED = 4
+    const val CHAT_ACCESS_PASSIVE = 0
+    const val CHAT_ACCESS_EXPLICIT_NAVIGATION = 1
+    const val CHAT_ACCESS_NOTIFICATION = 2
 
     // Event discriminants — value of SessionEvent.kind.
     const val EVENT_MESSAGE_ADDED = 1

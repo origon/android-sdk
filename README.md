@@ -105,9 +105,8 @@ OrigonClient.initLogging()
 // Create the client. `context` is an Android Context (usually
 // `applicationContext`); the SDK uses it to read `packageName` and
 // send it as `X-Bundle-Id` on every HTTPS call.
-// `userId` is optional — when omitted, the SDK falls back to the device
-// identifier (Settings.Secure.ANDROID_ID) so anonymous users still get a
-// stable identity.
+// `userId` is optional — when omitted, the SDK uses a random app-install id
+// under no-backup storage as an opaque anonymous id. It never uses ANDROID_ID.
 val client = OrigonClient(
     context,
     ClientConfig(endpoint = "https://origon.ai/chat/api/<id>"),
@@ -290,6 +289,36 @@ client.notifyTyping(id = sessionId)
 client.stopTyping(id = sessionId)
 ```
 
+### Retained chat continuity
+
+The host owns lifecycle triggers; the SDK session manager owns restore. Run one
+bounded passive restore on foreground/bootstrap. It attaches only directory rows
+reported as `active` and never steals another installation's visitor stream:
+
+```kotlin
+val report = client.restoreActiveChats()
+val elsewhere = report.filter { it.status == RestoreStatus.ACTIVE_ELSEWHERE }
+
+// Explicit history navigation or a notification tap uses named authority.
+client.openChat(sessionId, intent = ChatAccessIntent.EXPLICIT_NAVIGATION)
+```
+
+History reads are finite cache-first flows. They emit a valid cached snapshot
+immediately when present, then one authoritative network snapshot (or a typed
+refresh failure that says whether cache was shown):
+
+```kotlin
+client.sessionUpdates(sessionId).collect { update ->
+    when (update) {
+        is SessionLoadUpdate.Snapshot -> render(update.value.session.history)
+        is SessionLoadUpdate.RefreshFailed -> showRefreshError(update.error)
+    }
+}
+```
+
+Do not add a second host restore loop or attach the same id independently. An
+ended row remains view-only until the ordinary first-send reopen path runs.
+
 Polling chat events:
 
 ```kotlin
@@ -349,15 +378,45 @@ and the `com.google.firebase:firebase-messaging` dependency), then
 forward the token from your `FirebaseMessagingService`:
 
 ```kotlin
-import ai.origon.sdk.OrigonClient
+import ai.origon.sdk.OrigonPushNotifications
 import com.google.firebase.messaging.FirebaseMessagingService
 
 class AppMessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
-        OrigonClient.registerForPushNotifications(token)
+        OrigonPushNotifications.onNewToken(token)
     }
 }
 ```
+
+In `onMessageReceived`, authorize all server-provided visible copy before
+building a notification:
+
+```kotlin
+override fun onMessageReceived(message: RemoteMessage) {
+    val payload = OrigonPushNotifications.currentPayload(this, message.data)
+    if (payload == null) {
+        // Missing/stale generation: neither title nor preview is exposed.
+        // Suppress, or show only app-owned generic copy.
+        return
+    }
+    showNotification(
+        title = payload.title ?: "Origon",
+        body = payload.preview ?: "New message",
+        payload = payload,
+    )
+}
+```
+
+`title` is the optional server-normalized human agent name. An absent or blank
+title is exposed as `null`. Never read `message.data["title"]` or
+`message.data["preview"]` directly: `currentPayload` returns them only after an
+exact `endpointGeneration` match, and returns `null` when the generation is
+missing or stale.
+
+Use a stable `PendingIntent` carrying `sessionId`; when the user taps, initialize
+the client and call `OrigonPushNotifications.open(client, payload)`. A tap is
+explicit takeover intent; background receipt is not. Keep tap extras to routing
+and authorization fields—do not copy `title` or `preview` into them.
 
 Declare the service in your `AndroidManifest.xml`:
 
@@ -379,10 +438,27 @@ wins. The call returns immediately and runs the network request in the
 background; failures are logged, not thrown. FCM has no sandbox/
 production split, so no environment is sent.
 
+The exact token and returned endpoint generation are stored under
+`noBackupFilesDir`. Call registration on every FCM token refresh. On logout,
+unregister before closing the client and cancel delivered notifications. An
+uninstall cannot send logout; FCM invalid-token feedback and the server's
+90-day endpoint TTL perform eventual cleanup.
+
 ```kotlin
 // On logout:
-OrigonClient.unregisterForPushNotifications()
+client.unregisterForPushNotifications() // waits for exact unregister
+client.close()
 ```
+
+The companion `OrigonClient.unregisterForPushNotifications()` remains the
+fire-and-forget convenience. Use the instance method above when logout will
+immediately close the client.
+
+Release builds pin NDK `27.2.12479018` so AGP can strip the prebuilt Rust
+libraries instead of packaging them behind an “Unable to strip” warning. Before
+publication, run `scripts/verify-release-aar.sh` on the local release AAR; it
+requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, and
+0x4000 PT_LOAD alignment on both 64-bit libraries.
 
 ## API Reference
 
@@ -394,6 +470,8 @@ OrigonClient.unregisterForPushNotifications()
 | `close()` | Release the native handle. |
 | `pollEvent()` | Non-blocking poll. Returns `null` when idle. |
 | `startSession(options)` | Open a session. Returns `(sessionId, url, token)`. |
+| `restoreActiveChats()` | Passively attach retained active chats and return per-id outcomes. |
+| `openChat(sessionId, intent)` | Open one retained chat with `PASSIVE`, `EXPLICIT_NAVIGATION`, or `NOTIFICATION` authority. |
 | `joinSession(input)` | Attach to a previously-obtained `StartSessionResponse`. |
 | `endSession(id)` / `endAllSessions()` | Close a single / every session. |
 | `setMute(id, muted)` / `setMuteAll(muted)` | Voice — absolute mute. |
@@ -404,11 +482,15 @@ OrigonClient.unregisterForPushNotifications()
 | `uploadAttachment(path \| uri \| bytes, fileName, …)` | `suspend`; upload a file (path / `Uri` / `ByteArray` overloads) against the client's widget and return the server-issued `Attachment`. No session required. Reports progress via `onProgress`. |
 | `deleteAttachment(attachmentId)` | `suspend`; cancel an in-flight upload (pass the `uploadId`) or delete a completed attachment (pass `attachment.id`). No session required. |
 | `activeSessions()` | Snapshot of every active session. |
-| `getSessions()` | `GET /sessions` — list prior sessions for the configured `userId`. |
-| `getSession(id)` | `GET /session/<id>` — transcript for one session. |
+| `sessionDirectoryUpdates(policy)` | Finite `Flow`: cached directory then authoritative network directory by default. |
+| `sessionUpdates(id, policy)` | Finite `Flow`: cached transcript then authoritative network transcript by default. |
+| `cachedSession(s)` / `refreshSession(s)` | Explicit suspend cache-only / network-only reads. |
+| `removeCachedSession` / `clearChatCache` / `pruneChatCache` | Suspend cache maintenance scoped to this client. |
+| `OrigonClient.clearAllChatCaches(context)` | Handle-independent cache-root quarantine; close live clients first. |
 | `setAttributes(attributes)` | Replace session-level attributes injected as `data.attributes` on `startSession`. |
 | `OrigonClient.registerForPushNotifications(token)` | Companion. Register an FCM token (buffered until init; latest wins). |
 | `OrigonClient.unregisterForPushNotifications()` | Companion. Remove this device's push registration (e.g. on logout). |
+| `OrigonPushNotifications.currentPayload(context, data)` | Validate the exact endpoint generation, then expose routing plus optional authorized `title` / `preview`; returns `null` for missing or stale authority. |
 | `startMessage` / `isChatEnabled` / `isCallEnabled` / `multipleChannels` / `attachmentPolicy` / `serverConfig` | Cached `/config` getters. |
 | `OrigonClient.initLogging(filter)` | Install Rust-side `tracing` subscriber. |
 
@@ -416,7 +498,7 @@ OrigonClient.unregisterForPushNotifications()
 
 | Type | Description |
 | --- | --- |
-| `ClientConfig` | endpoint, optional `token`, optional `userId`, attributes (`JsonObject?`). The app is authenticated by its **package name** (`applicationId`), resolved automatically from `context.packageName` (passed to `OrigonClient`) and sent as `X-Bundle-Id` on every HTTPS call (register it first — see [Prerequisites](#prerequisites)). `token` is an optional auth token. `userId` defaults to the device identifier (`Settings.Secure.ANDROID_ID`) when omitted. |
+| `ClientConfig` | endpoint, optional `token`, optional `userId`, attributes, and default-on `chatCachePolicy`. The app package is resolved from `Context`; `userId` defaults to the random no-backup app-install id. |
 | `Channel` | `CHAT`, `VOICE`. |
 | `SessionControl` | `AI`, `USER`. |
 | `MessageRole` | `AI`, `EXTERNAL`, `USER`, `SYSTEM`. |
@@ -427,6 +509,7 @@ OrigonClient.unregisterForPushNotifications()
 | `StartSessionResponse` | sessionId, url, token. |
 | `JoinSessionInput` | channel, sessionId, url, token. |
 | `ActiveSession` | sessionId, channel. |
+| `OrigonNotificationPayload` | Authorized notification routing plus optional `title` and `preview`; blank title is `null`. |
 | `AttachmentRule` / `AttachmentPolicy` | tenant policy for attachments. |
 | `ServerConfig` | full `/config` snapshot (start message, capability flags, attachment policy). |
 | `DisconnectReason` | sealed class of structured reasons. |
@@ -434,7 +517,7 @@ OrigonClient.unregisterForPushNotifications()
 | `Message` | typed transcript line. Carries `id`, `localId`, `role`, `text`, `html`, `userId`, `userName`, `timestamp`, `attachments`, `errorText`, `status`, `state`. |
 | `Attachment` | uploaded-media descriptor: `id`, `name`, `contentType`, `url`, and an optional client-side `localUrl` preview (kept on the local `Message`, stripped from the wire). Returned by `uploadAttachment(...)`, carried on `Message.attachments`, and passed back into `SendMessagePayload.attachments`. |
 | `UploadProgress` | `bytesUploaded`, optional `totalBytes`, optional `percent` (both `null` when the transport reports no content length). Passed to the `uploadAttachment` `onProgress` callback. |
-| `Contact`, `SessionSummary`, `SessionHistory` | typed shapes returned by `getSessions()` / `getSession(id)`. |
+| `SessionSnapshot`, `SessionsSnapshot`, load updates | Cache/network snapshots and typed refresh failures emitted by finite flows. |
 | `SendMessagePayload` | `text`, `html`, `attachments` (input shape for `sendMessage(id, payload)`). |
 
 ## License

@@ -106,10 +106,8 @@ data class ClientConfig(
     val endpoint: String,
     val token: String? = null,
     /**
-     * Optional. When omitted, the SDK falls back to the device
-     * identifier (`Settings.Secure.ANDROID_ID`) so anonymous users still
-     * get a stable identity. Initialization fails only if both this and
-     * the device identifier are unavailable.
+     * Optional. When omitted, the SDK uses its random, no-backup app-install
+     * id as an opaque anonymous id. It is never a hardware/person identity.
      */
     val userId: String? = null,
     /**
@@ -118,7 +116,41 @@ data class ClientConfig(
      * `kotlinx.serialization` before crossing the native boundary.
      */
     val attributes: JsonObject? = null,
+    /** Durable transcript cache is enabled unless explicitly disabled. */
+    val chatCachePolicy: ChatCachePolicy = ChatCachePolicy.ENABLED,
 )
+
+enum class ChatCachePolicy { ENABLED, DISABLED }
+
+enum class SessionLoadPolicy {
+    CACHE_THEN_NETWORK,
+    NETWORK_ONLY,
+    CACHE_ONLY;
+
+    internal fun toBridge(): Int = when (this) {
+        CACHE_THEN_NETWORK -> SessionBridge.LOAD_CACHE_THEN_NETWORK
+        NETWORK_ONLY -> SessionBridge.LOAD_NETWORK_ONLY
+        CACHE_ONLY -> SessionBridge.LOAD_CACHE_ONLY
+    }
+}
+
+@Serializable
+enum class SessionLoadSource {
+    @SerialName("cache") CACHE,
+    @SerialName("network") NETWORK,
+}
+
+enum class ChatAccessIntent {
+    PASSIVE,
+    EXPLICIT_NAVIGATION,
+    NOTIFICATION;
+
+    internal fun toBridge(): Int = when (this) {
+        PASSIVE -> SessionBridge.CHAT_ACCESS_PASSIVE
+        EXPLICIT_NAVIGATION -> SessionBridge.CHAT_ACCESS_EXPLICIT_NAVIGATION
+        NOTIFICATION -> SessionBridge.CHAT_ACCESS_NOTIFICATION
+    }
+}
 
 data class StartCallOptions(
     /** Existing session id to resume; null for a new session. */
@@ -374,25 +406,81 @@ data class Contact(
     val name: String,
 )
 
-/** Element of the array returned by [OrigonClient.getSessions]. */
+/** Element of a session-directory snapshot. */
 @Serializable
 data class SessionSummary(
     val sessionId: String,
     val subject: String,
     val channel: Channel,
+    /** Live only on the cx owner that served this directory row. */
+    val active: Boolean,
     val createdAt: String,
     val updatedAt: String,
     val lastMessage: Message? = null,
     val contact: Contact? = null,
 )
 
-/** Returned by [OrigonClient.getSession]. */
+enum class RestoreStatus {
+    CONNECTED,
+    ALREADY_CONNECTED,
+    ACTIVE_ELSEWHERE,
+    NO_LONGER_ACTIVE,
+    FAILED,
+}
+
+internal fun restoreStatus(value: Int): RestoreStatus = when (value) {
+    0 -> RestoreStatus.CONNECTED
+    1 -> RestoreStatus.ALREADY_CONNECTED
+    2 -> RestoreStatus.ACTIVE_ELSEWHERE
+    3 -> RestoreStatus.NO_LONGER_ACTIVE
+    else -> RestoreStatus.FAILED
+}
+
+data class RestoreResult(
+    val sessionId: String,
+    val status: RestoreStatus,
+    val error: String? = null,
+)
+
+/** Authoritative transcript history carried by a session snapshot. */
 @Serializable
 data class SessionHistory(
     val history: List<Message> = emptyList(),
     /** Who is currently driving the session. */
     val control: SessionControl = SessionControl.AI,
 )
+
+@Serializable
+data class SessionSnapshot(
+    val source: SessionLoadSource,
+    val authoritative: Boolean,
+    val refreshedAt: Long,
+    val session: SessionHistory,
+)
+
+@Serializable
+data class SessionsSnapshot(
+    val source: SessionLoadSource,
+    val authoritative: Boolean,
+    val refreshedAt: Long,
+    val sessions: List<SessionSummary>,
+)
+
+sealed interface SessionLoadUpdate {
+    data class Snapshot(val value: SessionSnapshot) : SessionLoadUpdate
+    data class RefreshFailed(
+        val error: SessionException,
+        val cachedSnapshotEmitted: Boolean,
+    ) : SessionLoadUpdate
+}
+
+sealed interface SessionsLoadUpdate {
+    data class Snapshot(val value: SessionsSnapshot) : SessionsLoadUpdate
+    data class RefreshFailed(
+        val error: SessionException,
+        val cachedSnapshotEmitted: Boolean,
+    ) : SessionsLoadUpdate
+}
 
 // ── Disconnect / events ──────────────────────────────────────────────
 
