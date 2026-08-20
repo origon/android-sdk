@@ -552,10 +552,7 @@ class ChatService internal constructor(
         when (event) {
             is ClientEvent.MessageAdded -> sessionsState.update { states ->
                 val s = states[sid] ?: return@update states
-                states + (sid to s.copy(
-                    messages = s.messages + event.message,
-                    liveMessageKeys = s.liveMessageKeys + messageKey(event.message),
-                ))
+                states + (sid to applyingMessageAdded(event.message, s))
             }
             is ClientEvent.MessageUpdated -> updateMessage(sid, event.id, event.message)
             is ClientEvent.Typing -> sessionsState.update { states ->
@@ -593,10 +590,10 @@ class ChatService internal constructor(
             state: SessionUIState,
         ): SessionUIState {
             val index = state.messages.indexOfFirst { messageKey(it) == key }
-            if (index < 0) return state.copy(
-                messages = state.messages + message,
-                liveMessageKeys = state.liveMessageKeys + messageKey(message),
-            )
+            // A MessageUpdated without its provisional MessageAdded has no
+            // app-owned identity to correlate. Let the sequenced SDK snapshot
+            // install it rather than inventing a second authoritative reducer.
+            if (index < 0) return state
             val prior = state.messages[index]
             val replacement = overlayLocalHints(prior, message)
             val messages = state.messages.toMutableList().also { it[index] = replacement }
@@ -604,6 +601,17 @@ class ChatService internal constructor(
                 messages = messages,
                 liveMessageKeys = (state.liveMessageKeys - messageKey(prior)) + messageKey(replacement),
             )
+        }
+
+        internal fun applyingMessageAdded(message: Message, state: SessionUIState): SessionUIState {
+            val key = messageKey(message)
+            val index = state.messages.indexOfFirst { messageKey(it) == key }
+            val messages = if (index < 0) {
+                state.messages + message
+            } else {
+                state.messages.toMutableList().also { it[index] = overlayLocalHints(it[index], message) }
+            }
+            return state.copy(messages = messages, liveMessageKeys = state.liveMessageKeys + key)
         }
 
         internal fun reconcile(history: List<Message>, state: SessionUIState): SessionUIState {

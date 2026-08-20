@@ -181,6 +181,22 @@ class ChatDestinationPolicyTest {
         assertEquals("sdk-local", failedState.messages[0].localId)
     }
 
+    @Test
+    fun eventReplayIsIdempotentAndUnknownUpdateWaitsForAuthoritativeSnapshot() {
+        val inbound = message("inbound")
+        val empty = ChatService.SessionUIState()
+        val once = ChatService.applyingMessageAdded(inbound, empty)
+        val twice = ChatService.applyingMessageAdded(inbound, once)
+        assertEquals(1, twice.messages.size)
+
+        val unknownDelivered = message("server-only")
+        val unchanged = ChatService.applyingMessageUpdate("missing-local", unknownDelivered, twice)
+        assertEquals(twice, unchanged)
+
+        val authoritative = ChatService.reconcile(listOf(inbound, unknownDelivered), unchanged)
+        assertEquals(listOf("inbound", "server-only"), authoritative.messages.map { it.id })
+    }
+
     private class Fixture(parent: CoroutineScope) {
         private val job = SupervisorJob(parent.coroutineContext[Job])
         val scope = CoroutineScope(parent.coroutineContext + job)
