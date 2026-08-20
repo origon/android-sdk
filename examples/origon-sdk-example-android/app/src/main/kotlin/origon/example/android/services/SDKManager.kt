@@ -54,6 +54,9 @@ class SDKManager(private val appContext: Context) {
     var client: OrigonClient? = null
         private set
 
+    internal val chatClient: ChatSessionClient?
+        get() = client?.let(::OrigonChatSessionClient)
+
     // Child services subscribe to `events` in their constructors. `scope`
     // and `_events` are initialized above, so this ordering is safe.
     val call = CallService(this)
@@ -65,6 +68,7 @@ class SDKManager(private val appContext: Context) {
 
     /** Connect to the Origon backend and start the event poll loop. */
     suspend fun initialize(endpoint: String, userId: String? = null, token: String? = null) {
+        chat.clientWillChange()
         val config = ClientConfig(
             endpoint = endpoint,
             token = token,

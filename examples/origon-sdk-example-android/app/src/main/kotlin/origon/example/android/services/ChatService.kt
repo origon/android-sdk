@@ -1,15 +1,24 @@
 package origon.example.android.services
 
 import android.net.Uri
+import ai.origon.sdk.ChatAccessIntent
 import ai.origon.sdk.ClientEvent
 import ai.origon.sdk.DisconnectReason
 import ai.origon.sdk.Message
 import ai.origon.sdk.MessageRole
+import ai.origon.sdk.MessageStatus
+import ai.origon.sdk.OrigonClient
 import ai.origon.sdk.SendMessagePayload
 import ai.origon.sdk.SessionException
+import ai.origon.sdk.SessionLoadUpdate
 import ai.origon.sdk.StartChatOptions
 import ai.origon.sdk.UploadProgress
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -21,12 +30,14 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import origon.example.android.data.PendingAttachment
 import origon.example.android.util.SdkErrorKinds
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Owns in-memory chat state for every active chat session. Mirrors the
@@ -34,11 +45,39 @@ import java.util.UUID
  * own [SessionUIState]; the focused session's state is projected via the
  * [messages] / [isTyping] / [pendingAttachments] flows the UI binds to.
  */
-class ChatService(private val manager: SDKManager) {
+class ChatService internal constructor(
+    private val scope: CoroutineScope,
+    events: Flow<ClientEvent>,
+    private val sdkClient: () -> OrigonClient?,
+    private val destinationClient: () -> ChatSessionClient?,
+    private val refreshSessions: suspend () -> Unit,
+) {
+
+    constructor(manager: SDKManager) : this(
+        scope = manager.scope,
+        events = manager.events,
+        sdkClient = { manager.client },
+        destinationClient = { manager.chatClient },
+        refreshSessions = { manager.refreshSessions() },
+    )
+
+    enum class DestinationLoadState {
+        IDLE,
+        LOADING,
+        CACHED,
+        NETWORK,
+        FRESH_EMPTY,
+        REFRESH_FAILED_CACHED,
+        REFRESH_FAILED_EMPTY,
+        FAILED,
+    }
 
     data class SessionUIState(
         val messages: List<Message> = emptyList(),
         val isTyping: Boolean = false,
+        val accessGranted: Boolean = false,
+        val loadState: DestinationLoadState = DestinationLoadState.IDLE,
+        val liveMessageKeys: Set<String> = emptySet(),
         val pendingAttachments: List<PendingAttachment> = emptyList(),
         /**
          * Which option the user tapped on each interactive prompt, keyed by
@@ -78,32 +117,47 @@ class ChatService(private val manager: SDKManager) {
 
     /** Serializes the lazy chat-session start so only one POST fires. */
     private val startMutex = Mutex()
+    private val clientEpoch = AtomicLong(0)
+    private val destinationEpoch = AtomicLong(0)
 
     // MARK: - Focused-session projections
 
     val messages: StateFlow<List<Message>> =
         combine(sessionsState, _currentSessionId) { states, id ->
             id?.let { states[it]?.messages } ?: emptyList()
-        }.stateIn(manager.scope, SharingStarted.Eagerly, emptyList())
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     val isTyping: StateFlow<Boolean> =
         combine(sessionsState, _currentSessionId) { states, id ->
             id?.let { states[it]?.isTyping } ?: false
-        }.stateIn(manager.scope, SharingStarted.Eagerly, false)
+        }.stateIn(scope, SharingStarted.Eagerly, false)
 
     val pendingAttachments: StateFlow<List<PendingAttachment>> =
         combine(sessionsState, _currentSessionId, draftPending) { states, id, draft ->
             if (id != null) states[id]?.pendingAttachments ?: emptyList() else draft
-        }.stateIn(manager.scope, SharingStarted.Eagerly, emptyList())
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     val hasUploadingAttachments: Boolean
         get() = pendingAttachments.value.any { it.status == PendingAttachment.Status.UPLOADING }
 
     init {
-        manager.scope.launch {
-            manager.events.collect { handleEvent(it) }
+        scope.launch {
+            events.collect { handleEvent(it) }
         }
     }
+
+    internal fun clientWillChange() {
+        clientEpoch.incrementAndGet()
+        destinationEpoch.incrementAndGet()
+        sessionsState.update { states ->
+            states.mapValues { (_, state) -> state.copy(accessGranted = false) }
+        }
+    }
+
+    internal fun stateFor(id: String): SessionUIState? = sessionsState.value[id]
+
+    internal val canSendFocusedSession: Boolean
+        get() = _currentSessionId.value?.let { sessionsState.value[it]?.accessGranted } ?: true
 
     // MARK: - Session lifecycle
 
@@ -113,45 +167,105 @@ class ChatService(private val manager: SDKManager) {
      * fetches history + opens the SDK chat channel for that id.
      */
     suspend fun openSession(id: String?) {
+        val operation = destinationEpoch.incrementAndGet()
+        val epoch = clientEpoch.get()
         if (id == null) {
             _currentSessionId.value = null
             return
         }
-        if (sessionsState.value[id] != null) {
-            _currentSessionId.value = id
-            adoptDrafts(id)
-            return
+        val client = destinationClient() ?: return
+        sessionsState.update { states ->
+            val state = states[id] ?: SessionUIState()
+            states + (id to state.copy(
+                accessGranted = false,
+                loadState = DestinationLoadState.LOADING,
+            ))
         }
-        val client = manager.client ?: return
+        _currentSessionId.value = id
+        adoptDrafts(id)
+
+        coroutineScope {
+            val history = async { loadDestination(id, client, epoch, operation) }
+            val access = async { acquireDestination(id, client, epoch, operation) }
+            history.await()
+            access.await()
+        }
+        if (destinationIsCurrent(id, epoch, operation)) runCatching { refreshSessions() }
+    }
+
+    private suspend fun loadDestination(
+        id: String,
+        client: ChatSessionClient,
+        epoch: Long,
+        operation: Long,
+    ) {
         try {
-            // View-only open: fetch the history and render it, but do NOT
-            // call startChat — that verb exists to open a session WITH the
-            // visitor's first message, and opening one here just to read a
-            // past conversation would attach a participant and start a chat
-            // nobody has spoken in. The session goes live on the first send.
-            var focused = false
             client.sessionUpdates(id).collect { update ->
+                if (!destinationIsCurrent(id, epoch, operation)) return@collect
                 when (update) {
-                    is ai.origon.sdk.SessionLoadUpdate.Snapshot -> sessionsState.update {
-                        val existing = it[id] ?: SessionUIState()
-                        it + (id to existing.copy(messages = update.value.session.history))
+                    is SessionLoadUpdate.Snapshot -> sessionsState.update { states ->
+                        val current = states[id] ?: return@update states
+                        val reconciled = reconcile(update.value.session.history, current)
+                        val load = when {
+                            !update.value.authoritative -> DestinationLoadState.CACHED
+                            update.value.session.history.isEmpty() -> DestinationLoadState.FRESH_EMPTY
+                            else -> DestinationLoadState.NETWORK
+                        }
+                        states + (id to reconciled.copy(loadState = load))
                     }
-                    is ai.origon.sdk.SessionLoadUpdate.RefreshFailed -> {
-                        if (!update.cachedSnapshotEmitted) throw update.error
-                        _error.tryEmit("Could not refresh conversation: ${update.error.message}")
+                    is SessionLoadUpdate.RefreshFailed -> {
+                        sessionsState.update { states ->
+                            val current = states[id] ?: return@update states
+                            states + (id to current.copy(loadState = if (update.cachedSnapshotEmitted) {
+                                DestinationLoadState.REFRESH_FAILED_CACHED
+                            } else {
+                                DestinationLoadState.REFRESH_FAILED_EMPTY
+                            }))
+                        }
+                        _error.tryEmit(if (update.cachedSnapshotEmitted) {
+                            "Showing saved messages. Could not refresh this conversation."
+                        } else {
+                            "Failed to load conversation: ${update.error.message}"
+                        })
                     }
-                }
-                if (!focused && update is ai.origon.sdk.SessionLoadUpdate.Snapshot) {
-                    _currentSessionId.value = id
-                    adoptDrafts(id)
-                    focused = true
                 }
             }
-            runCatching { manager.refreshSessions() }
-        } catch (e: Throwable) {
-            _error.tryEmit("Failed to open session: ${e.message}")
+        } catch (error: Throwable) {
+            if (!destinationIsCurrent(id, epoch, operation)) return
+            sessionsState.update { states ->
+                val current = states[id] ?: return@update states
+                states + (id to current.copy(loadState = DestinationLoadState.FAILED))
+            }
+            _error.tryEmit("Failed to load conversation: ${error.message}")
         }
     }
+
+    private suspend fun acquireDestination(
+        id: String,
+        client: ChatSessionClient,
+        epoch: Long,
+        operation: Long,
+    ) {
+        try {
+            client.acquireChatAccess(id, ChatAccessIntent.EXPLICIT_NAVIGATION)
+            if (!destinationIsCurrent(id, epoch, operation)) return
+            sessionsState.update { states ->
+                val current = states[id] ?: return@update states
+                states + (id to current.copy(accessGranted = true))
+            }
+        } catch (error: Throwable) {
+            if (!destinationIsCurrent(id, epoch, operation)) return
+            sessionsState.update { states ->
+                val current = states[id] ?: return@update states
+                states + (id to current.copy(accessGranted = false))
+            }
+            _error.tryEmit("Conversation is view-only: ${error.message}")
+        }
+    }
+
+    private suspend fun destinationIsCurrent(id: String, epoch: Long, operation: Long): Boolean =
+        currentCoroutineContext().isActive && clientEpoch.get() == epoch &&
+            destinationEpoch.get() == operation && _currentSessionId.value == id
 
     /**
      * Move any draft tiles onto the session being focused.
@@ -201,7 +315,7 @@ class ChatService(private val manager: SDKManager) {
             val completed = pendingAttachments.value
                 .mapNotNull { if (it.status == PendingAttachment.Status.COMPLETED) it.attachment else null }
             if (trimmed.isEmpty() && completed.isEmpty()) return
-            val client = manager.client ?: return
+            val client = sdkClient() ?: return
 
             val payload = SendMessagePayload(
                 text = trimmed.ifEmpty { null },
@@ -211,6 +325,10 @@ class ChatService(private val manager: SDKManager) {
             )
             val focused = _currentSessionId.value
             val id = if (focused != null) {
+                if (sessionsState.value[focused]?.accessGranted != true) {
+                    _error.tryEmit("Conversation is still opening. Try again when it is ready.")
+                    return
+                }
                 withContext(Dispatchers.IO) { client.sendMessage(focused, payload) }
                 focused
             } else {
@@ -313,14 +431,14 @@ class ChatService(private val manager: SDKManager) {
 
     /** Notify the peer the user is typing. Cheap to call; SDK debounces. */
     fun notifyTyping() {
-        val client = manager.client ?: return
+        val client = sdkClient() ?: return
         val id = _currentSessionId.value ?: return
         runCatching { client.notifyTyping(id) }
     }
 
     /** Force outbound typing off — input went empty. */
     fun stopTyping() {
-        val client = manager.client ?: return
+        val client = sdkClient() ?: return
         val id = _currentSessionId.value ?: return
         runCatching { client.stopTyping(id) }
     }
@@ -328,7 +446,7 @@ class ChatService(private val manager: SDKManager) {
     /** End the focused chat session and drop its UI state. */
     fun endCurrentSession() {
         val id = _currentSessionId.value ?: return
-        manager.client?.let { runCatching { it.endSession(id) } }
+        sdkClient()?.let { runCatching { it.endSession(id) } }
         sessionsState.update { it - id }
         _currentSessionId.value = null
     }
@@ -354,7 +472,7 @@ class ChatService(private val manager: SDKManager) {
             progress = 0,
         )
         appendPending(pending)
-        manager.scope.launch { runUpload(localId, uri, fileName) }
+        scope.launch { runUpload(localId, uri, fileName) }
     }
 
     fun removePendingAttachment(id: String) {
@@ -380,7 +498,7 @@ class ChatService(private val manager: SDKManager) {
         }
 
         val row = removed ?: return
-        val client = manager.client ?: return
+        val client = sdkClient() ?: return
         when (row.status) {
             PendingAttachment.Status.UPLOADING -> {
                 // deleteAttachment matches the local id against the SDK's
@@ -388,13 +506,13 @@ class ChatService(private val manager: SDKManager) {
                 // which list hosted the row — the write lane is
                 // widget-scoped, and a draft-list upload is now the common
                 // case since uploads no longer wait on a session.
-                manager.scope.launch {
+                scope.launch {
                     runCatching { client.deleteAttachment(id) }
                 }
             }
             PendingAttachment.Status.COMPLETED -> {
                 val serverId = row.attachment?.id ?: return
-                manager.scope.launch {
+                scope.launch {
                     runCatching { client.deleteAttachment(serverId) }
                 }
             }
@@ -406,7 +524,8 @@ class ChatService(private val manager: SDKManager) {
 
     /** End every active chat session and clear UI state. Called on logout. */
     fun destroy() {
-        manager.client?.let { client ->
+        clientWillChange()
+        sdkClient()?.let { client ->
             for (id in sessionsState.value.keys) runCatching { client.endSession(id) }
         }
         sessionsState.value = emptyMap()
@@ -433,7 +552,10 @@ class ChatService(private val manager: SDKManager) {
         when (event) {
             is ClientEvent.MessageAdded -> sessionsState.update { states ->
                 val s = states[sid] ?: return@update states
-                states + (sid to s.copy(messages = s.messages + event.message))
+                states + (sid to s.copy(
+                    messages = s.messages + event.message,
+                    liveMessageKeys = s.liveMessageKeys + messageKey(event.message),
+                ))
             }
             is ClientEvent.MessageUpdated -> updateMessage(sid, event.id, event.message)
             is ClientEvent.Typing -> sessionsState.update { states ->
@@ -454,21 +576,71 @@ class ChatService(private val manager: SDKManager) {
     private fun updateMessage(sid: String, key: String, message: Message) {
         sessionsState.update { states ->
             val s = states[sid] ?: return@update states
-            val idx = s.messages.indexOfFirst { messageKey(it) == key }
-            val newMessages = if (idx >= 0) {
-                s.messages.toMutableList().also { it[idx] = message }
-            } else {
-                s.messages + message
-            }
-            states + (sid to s.copy(messages = newMessages))
+            states + (sid to applyingMessageUpdate(key, message, s))
         }
     }
 
     // Outbound rows first appear with localId set and id == ""; the server
     // id lands on MessageUpdated. Prefer localId so the row tracks across
     // sending → delivered. Inbound rows have no localId, so id wins.
-    private fun messageKey(m: Message): String =
-        m.localId?.takeIf { it.isNotEmpty() } ?: m.id
+    companion object {
+        internal fun messageKey(m: Message): String =
+            m.localId?.takeIf { it.isNotEmpty() } ?: m.id
+
+        internal fun applyingMessageUpdate(
+            key: String,
+            message: Message,
+            state: SessionUIState,
+        ): SessionUIState {
+            val index = state.messages.indexOfFirst { messageKey(it) == key }
+            if (index < 0) return state.copy(
+                messages = state.messages + message,
+                liveMessageKeys = state.liveMessageKeys + messageKey(message),
+            )
+            val prior = state.messages[index]
+            val replacement = overlayLocalHints(prior, message)
+            val messages = state.messages.toMutableList().also { it[index] = replacement }
+            return state.copy(
+                messages = messages,
+                liveMessageKeys = (state.liveMessageKeys - messageKey(prior)) + messageKey(replacement),
+            )
+        }
+
+        internal fun reconcile(history: List<Message>, state: SessionUIState): SessionUIState {
+            val localByServerId = state.messages
+                .filter { it.id.isNotEmpty() }
+                .associateBy { it.id }
+            val serverIds = history.mapNotNull { it.id.takeIf(String::isNotEmpty) }.toSet()
+            val consumedLive = mutableSetOf<String>()
+            val authoritative = history.map { remote ->
+                localByServerId[remote.id]?.let { local ->
+                    consumedLive += messageKey(local)
+                    overlayLocalHints(local, remote)
+                } ?: remote
+            }
+            val tail = state.messages.filter { local ->
+                if (local.id.isNotEmpty() && local.id in serverIds) return@filter false
+                local.status == MessageStatus.SENDING || local.status == MessageStatus.FAILED ||
+                    messageKey(local) in state.liveMessageKeys
+            }
+            return state.copy(
+                messages = authoritative + tail,
+                liveMessageKeys = state.liveMessageKeys - consumedLive,
+            )
+        }
+
+        private fun overlayLocalHints(local: Message, remote: Message): Message {
+            val localAttachments = local.attachments.associateBy { it.id }
+            return remote.copy(
+                localId = remote.localId?.takeIf(String::isNotEmpty) ?: local.localId,
+                attachments = remote.attachments.map { item ->
+                    localAttachments[item.id]?.localUrl?.let { preview ->
+                        item.copy(localUrl = preview)
+                    } ?: item
+                },
+            )
+        }
+    }
 
     // MARK: - Upload internals
 
@@ -485,7 +657,7 @@ class ChatService(private val manager: SDKManager) {
      * spoken for.
      */
     private suspend fun openAndSend(payload: SendMessagePayload): String {
-        val client = manager.client ?: throw IllegalStateException("SDK not initialized")
+        val client = sdkClient() ?: throw IllegalStateException("SDK not initialized")
         return startMutex.withLock {
             _currentSessionId.value?.let { existing ->
                 withContext(Dispatchers.IO) { client.sendMessage(existing, payload) }
@@ -508,13 +680,13 @@ class ChatService(private val manager: SDKManager) {
             }
             draftPending.value = emptyList()
             if (_currentSessionId.value == null) _currentSessionId.value = newId
-            manager.scope.launch { runCatching { manager.refreshSessions() } }
+            scope.launch { runCatching { refreshSessions() } }
             newId
         }
     }
 
     private suspend fun runUpload(localId: String, uri: Uri, fileName: String) {
-        val client = manager.client ?: run {
+        val client = sdkClient() ?: run {
             updatePending(localId) { it.copy(status = PendingAttachment.Status.ERROR, errorText = "Client not ready") }
             return
         }
