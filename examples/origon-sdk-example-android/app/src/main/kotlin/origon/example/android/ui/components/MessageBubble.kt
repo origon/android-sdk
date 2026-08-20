@@ -31,7 +31,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -160,8 +162,12 @@ private fun BubbleBody(
 ) {
     val context = LocalContext.current
     val isSelfUser = message.role == MessageRole.EXTERNAL
-    val text = message.text
-    val hasText = !text.isNullOrEmpty()
+    val hasText = !message.text.isNullOrEmpty() || !message.html.isNullOrEmpty()
+    val rich by produceState<List<ExampleRichBlock>>(
+        initialValue = emptyList(), message.html, message.text,
+    ) {
+        value = ExampleRichText.parse(message.html, message.text).blocks
+    }
     val interaction = remember { MutableInteractionSource() }
 
     // iOS `Spacer(minLength: 60)` on the far side. SwiftUI's Spacer expands
@@ -185,8 +191,8 @@ private fun BubbleBody(
             ),
         ) {
             if (hasText) {
-                Text(
-                    text.orEmpty(),
+                ExampleRichMessageText(
+                    blocks = rich,
                     style = MaterialTheme.typography.bodyLarge,
                     color = if (isSelfUser) {
                         MaterialTheme.colorScheme.onPrimary
