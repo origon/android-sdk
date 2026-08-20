@@ -78,6 +78,7 @@ class SDKManager(private val appContext: Context) {
         // round trip — keep it off the main thread.
         val newClient = withContext(Dispatchers.IO) { OrigonClient(appContext, config) }
         client = newClient
+        chat.clientDidChange()
         _isReady.value = true
         startPolling()
     }

@@ -2,13 +2,18 @@ package origon.example.android
 
 import ai.origon.sdk.Attachment
 import ai.origon.sdk.ChatAccessIntent
+import ai.origon.sdk.ClientEvent
+import ai.origon.sdk.DisconnectReason
 import ai.origon.sdk.Message
 import ai.origon.sdk.MessageStatus
+import ai.origon.sdk.SendMessagePayload
 import ai.origon.sdk.SessionException
 import ai.origon.sdk.SessionHistory
+import ai.origon.sdk.SessionLoadPolicy
 import ai.origon.sdk.SessionLoadSource
 import ai.origon.sdk.SessionLoadUpdate
 import ai.origon.sdk.SessionSnapshot
+import ai.origon.sdk.StartChatOptions
 import ai.origon.sdk.StartSessionResponse
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -25,6 +30,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
 import origon.example.android.services.ChatService
 import origon.example.android.services.ChatSessionClient
+import origon.example.android.data.PendingAttachment
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -197,6 +203,117 @@ class ChatDestinationPolicyTest {
         assertEquals(listOf("inbound", "server-only"), authoritative.messages.map { it.id })
     }
 
+    @Test
+    fun reconnectPreservesTranscriptAndGapRefetches() = runBlocking {
+        val fixture = Fixture(this)
+        fixture.service.installStateForTesting(
+            "chat",
+            ChatService.SessionUIState(messages = listOf(message("before")), accessGranted = true),
+        )
+
+        fixture.service.receiveForTesting(ClientEvent.Reconnecting(
+            "chat", 1, DisconnectReason.NetworkLoss,
+        ))
+        assertEquals(
+            ChatService.ConnectionState.RECONNECTING,
+            fixture.service.stateFor("chat")?.connectionState,
+        )
+        assertFalse(fixture.service.canSendFocusedSession)
+        assertEquals(listOf("before"), fixture.service.stateFor("chat")?.messages?.map { it.id })
+
+        fixture.service.receiveForTesting(ClientEvent.Reconnected("chat"))
+        fixture.fake.awaitStreams(1)
+        assertEquals(SessionLoadPolicy.NETWORK_ONLY, fixture.fake.policies[0])
+        fixture.fake.emit(0, snapshot(
+            SessionLoadSource.NETWORK, true, listOf(message("before"), message("missed")),
+        ))
+        fixture.fake.finish(0)
+        fixture.await { fixture.service.stateFor("chat")?.messages?.map { it.id } ==
+            listOf("before", "missed") }
+        assertEquals(
+            ChatService.ConnectionState.CONNECTED,
+            fixture.service.stateFor("chat")?.connectionState,
+        )
+        assertTrue(fixture.service.canSendFocusedSession)
+        fixture.close()
+    }
+
+    @Test
+    fun droppedAttachmentFirstSendResumesSameId() = runBlocking {
+        val fixture = Fixture(this)
+        val attachment = Attachment("file", "photo.jpg", "image/jpeg", "https://example.invalid/file")
+        val pending = PendingAttachment(
+            id = "local-file", fileName = "photo.jpg", contentType = "image/jpeg",
+            previewUri = null, status = PendingAttachment.Status.COMPLETED,
+            progress = 100, attachment = attachment,
+        )
+        fixture.service.installStateForTesting(
+            "chat",
+            ChatService.SessionUIState(
+                messages = listOf(message("kept")), accessGranted = false,
+                connectionState = ChatService.ConnectionState.DROPPED,
+                pendingAttachments = listOf(pending),
+            ),
+        )
+
+        fixture.service.sendMessage("")
+
+        assertEquals(1, fixture.fake.starts.size)
+        assertEquals("chat", fixture.fake.starts[0].sessionId)
+        assertEquals(listOf("file"), fixture.fake.starts[0].firstMessage.attachments.map { it.id })
+        assertEquals(listOf("kept"), fixture.service.stateFor("chat")?.messages?.map { it.id })
+        assertEquals(
+            ChatService.ConnectionState.CONNECTED,
+            fixture.service.stateFor("chat")?.connectionState,
+        )
+        assertTrue(fixture.service.stateFor("chat")?.pendingAttachments?.isEmpty() == true)
+        fixture.close()
+    }
+
+    @Test
+    fun cleanEndIsReadOnlyAndIgnoresStaleReconnect() = runBlocking {
+        val fixture = Fixture(this)
+        fixture.service.installStateForTesting(
+            "chat",
+            ChatService.SessionUIState(messages = listOf(message("kept")), accessGranted = true),
+        )
+        fixture.service.receiveForTesting(ClientEvent.ChatSessionEnded("chat", "complete"))
+        fixture.service.receiveForTesting(ClientEvent.Reconnected("chat"))
+        fixture.service.sendMessage("blocked")
+
+        assertEquals(
+            ChatService.ConnectionState.ENDED,
+            fixture.service.stateFor("chat")?.connectionState,
+        )
+        assertFalse(fixture.service.canSendFocusedSession)
+        assertEquals(listOf("kept"), fixture.service.stateFor("chat")?.messages?.map { it.id })
+        assertTrue(fixture.fake.starts.isEmpty())
+        assertTrue(fixture.fake.sent.isEmpty())
+        fixture.close()
+    }
+
+    @Test
+    fun clientEpochFencesLateEventsAndRefocusRefetches() = runBlocking {
+        val fixture = Fixture(this)
+        fixture.service.installStateForTesting(
+            "chat", ChatService.SessionUIState(messages = listOf(message("kept"))),
+        )
+        fixture.service.clientWillChange()
+        fixture.service.receiveForTesting(ClientEvent.MessageAdded("chat", message("stale")))
+        assertEquals(listOf("kept"), fixture.service.stateFor("chat")?.messages?.map { it.id })
+
+        fixture.service.clientDidChange()
+        fixture.service.refetchFocusedSession()
+        fixture.fake.awaitStreams(1)
+        fixture.fake.emit(0, snapshot(
+            SessionLoadSource.NETWORK, true, listOf(message("kept"), message("refocused")),
+        ))
+        fixture.fake.finish(0)
+        fixture.await { fixture.service.stateFor("chat")?.messages?.map { it.id } ==
+            listOf("kept", "refocused") }
+        fixture.close()
+    }
+
     private class Fixture(parent: CoroutineScope) {
         private val job = SupervisorJob(parent.coroutineContext[Job])
         val scope = CoroutineScope(parent.coroutineContext + job)
@@ -219,10 +336,15 @@ class ChatDestinationPolicyTest {
         )
 
         val streams = mutableListOf<Channel<SessionLoadUpdate>>()
+        val policies = mutableListOf<SessionLoadPolicy>()
         val accesses = mutableListOf<Access>()
+        val starts = mutableListOf<StartChatOptions>()
+        val sent = mutableListOf<Pair<String, SendMessagePayload>>()
 
-        override fun sessionUpdates(id: String): Flow<SessionLoadUpdate> =
-            Channel<SessionLoadUpdate>(Channel.UNLIMITED).also(streams::add).receiveAsFlow()
+        override fun sessionUpdates(id: String, policy: SessionLoadPolicy): Flow<SessionLoadUpdate> {
+            policies += policy
+            return Channel<SessionLoadUpdate>(Channel.UNLIMITED).also(streams::add).receiveAsFlow()
+        }
 
         override suspend fun acquireChatAccess(
             id: String,
@@ -232,10 +354,26 @@ class ChatDestinationPolicyTest {
             result.await()
         }
 
+        override suspend fun startChat(options: StartChatOptions): StartSessionResponse {
+            starts += options
+            return StartSessionResponse(
+                options.sessionId ?: "new-chat", "https://example.invalid", "test",
+            )
+        }
+
+        override suspend fun sendMessage(id: String, payload: SendMessagePayload) {
+            sent += id to payload
+        }
+
         suspend fun awaitRequests(count: Int) {
             repeat(500) { if (streams.size >= count && accesses.size >= count) return; yield() }
             assertEquals(count, streams.size)
             assertEquals(count, accesses.size)
+        }
+
+        suspend fun awaitStreams(count: Int) {
+            repeat(500) { if (streams.size >= count) return; yield() }
+            assertEquals(count, streams.size)
         }
 
         fun emit(index: Int, update: SessionLoadUpdate) { streams[index].trySend(update).getOrThrow() }

@@ -91,6 +91,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import origon.example.android.R
 import origon.example.android.data.PendingAttachment
 import origon.example.android.services.ChatService
@@ -269,6 +270,8 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     val pending by chat.pendingAttachments.collectAsState()
     val sessions by sdk.sessions.collectAsState()
     val currentSessionId by chat.currentSessionId.collectAsState()
+    val connectionState by chat.connectionState.collectAsState()
+    val canSend by chat.canSend.collectAsState()
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -277,6 +280,11 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     val toast = rememberToastState()
     val downloader = rememberAttachmentDownloader { error -> toast.show(error ?: "Saved") }
     val keyboard = LocalSoftwareKeyboardController.current
+
+    LifecycleResumeEffect(chat) {
+        chat.refetchFocusedSession()
+        onPauseOrDispose { }
+    }
 
     var draft by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
@@ -451,7 +459,10 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                     // a conversation with content, or a voice row being viewed.
                     showPlus = voice != null || messages.isNotEmpty(),
                     onNewSession = {
-                        chat.endCurrentSession()
+                        scope.launch {
+                            chat.endCurrentSession()
+                            chat.openSession(null)
+                        }
                         selectedSession = null
                     },
                 )
@@ -496,6 +507,11 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                         }
                     }
 
+                    ConnectionStatus(
+                        sessionId = currentSessionId,
+                        connection = connectionState,
+                        canSend = canSend,
+                    )
                     Composer(
                         draft = draft,
                         onDraftChange = { value ->
@@ -519,6 +535,7 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                         },
                         onSend = send,
                         onStartCall = startCall,
+                        enabled = currentSessionId == null || canSend,
                     )
                 }
             }
@@ -662,6 +679,27 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
 private class PreviewRequest(val attachments: List<Attachment>, val index: Int)
 
 @Composable
+private fun ConnectionStatus(
+    sessionId: String?,
+    connection: ChatService.ConnectionState,
+    canSend: Boolean,
+) {
+    if (sessionId == null) return
+    val text = when (connection) {
+        ChatService.ConnectionState.CONNECTED -> if (canSend) null else "Opening conversation…"
+        ChatService.ConnectionState.RECONNECTING -> "Reconnecting…"
+        ChatService.ConnectionState.DROPPED -> "Connection lost. Your next message will retry."
+        ChatService.ConnectionState.ENDED -> "Conversation ended. This transcript is read-only."
+    } ?: return
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = OrigonTheme.colors.textSecondary,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+    )
+}
+
+@Composable
 private fun EmptyTranscript() {
     Column(
         Modifier.fillMaxSize(),
@@ -765,6 +803,7 @@ private fun Composer(
     onAttach: (AttachKind) -> Unit,
     onSend: () -> Unit,
     onStartCall: () -> Unit,
+    enabled: Boolean,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val attachInteraction = remember { MutableInteractionSource() }
@@ -802,6 +841,7 @@ private fun Composer(
                         .clickable(
                             interactionSource = attachInteraction,
                             indication = null,
+                            enabled = enabled,
                             onClickLabel = "Attach",
                             onClick = { menuOpen = true },
                         ),
@@ -837,6 +877,7 @@ private fun Composer(
                 textStyle = MaterialTheme.typography.bodyLarge
                     .copy(color = OrigonTheme.colors.textPrimary),
                 cursorBrush = SolidColor(OrigonTheme.colors.textPrimary),
+                enabled = enabled,
                 modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
                 decorationBox = { field ->
                     Box(contentAlignment = Alignment.CenterStart) {
@@ -861,7 +902,7 @@ private fun Composer(
                     .clickable(
                         interactionSource = sendInteraction,
                         indication = null,
-                        enabled = !sending,
+                        enabled = enabled && !sending,
                         onClickLabel = if (hasContent) "Send" else "Start a call",
                         onClick = { if (hasContent) onSend() else onStartCall() },
                     ),
