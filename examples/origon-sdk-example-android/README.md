@@ -106,6 +106,12 @@ Two extra notes for SDK consumers (both are worked around in this example):
   `SessionException.kind` is a public `Int`. This example mirrors the
   discriminants in `util/SdkErrorKinds.kt`.
 
+The example pins jsoup 1.23.1 and commonmark-java 0.30.0 for the bounded native
+rich-message renderer. Its API 23 floor requires Google's NIO desugar runtime
+2.1.5. Exact third-party license texts are retained under
+`../../THIRD_PARTY_NOTICES/`; parser or desugar upgrades require renewed dependency
+and hostile-input review.
+
 For an FCM data-only integration, pass `RemoteMessage.data` through
 `OrigonPushNotifications.currentPayload` before displaying any server copy.
 Only an exact endpoint-generation match exposes `payload.title` and

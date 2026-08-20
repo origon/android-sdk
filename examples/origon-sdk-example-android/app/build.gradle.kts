@@ -100,7 +100,20 @@ dependencies {
     // needs the HTTP client directly and not only through coil.
     implementation("com.squareup.okhttp3:okhttp:5.4.0")
 
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    implementation("org.jsoup:jsoup:1.23.1")
+    implementation("org.commonmark:commonmark:0.30.0")
+    implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.30.0")
+
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
+    constraints {
+        add(
+            "coreLibraryDesugaring",
+            "com.android.tools:desugar_jdk_libs_configuration_nio:2.1.5",
+        ) {
+            version { strictly("2.1.5") }
+            because("the reviewed NIO desugar runtime has one exact configuration companion")
+        }
+    }
 
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit:2.4.10")
     androidTestImplementation("androidx.test:core:1.7.0")
