@@ -144,6 +144,11 @@ class ChatService internal constructor(
             id?.let { states[it]?.isTyping } ?: false
         }.stateIn(scope, SharingStarted.Eagerly, false)
 
+    val focusedLoadState: StateFlow<DestinationLoadState> =
+        combine(sessionsState, _currentSessionId) { states, id ->
+            id?.let { states[it]?.loadState } ?: DestinationLoadState.IDLE
+        }.stateIn(scope, SharingStarted.Eagerly, DestinationLoadState.IDLE)
+
     val pendingAttachments: StateFlow<List<PendingAttachment>> =
         combine(sessionsState, _currentSessionId, draftPending) { states, id, draft ->
             if (id != null) states[id]?.pendingAttachments ?: emptyList() else draft

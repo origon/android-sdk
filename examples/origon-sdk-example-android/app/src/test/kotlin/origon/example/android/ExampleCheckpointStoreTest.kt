@@ -8,12 +8,15 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import origon.example.android.services.EXAMPLE_CHECKPOINT_MAX_AGE_MS
 import origon.example.android.services.EXAMPLE_CHECKPOINT_MAX_ENTRIES
+import origon.example.android.services.EXAMPLE_NEW_MESSAGES_ACCESSIBILITY_LABEL
 import origon.example.android.services.ExampleCheckpoint
 import origon.example.android.services.ExampleCheckpointFiles
 import origon.example.android.services.ExampleCheckpointStore
 import origon.example.android.services.exampleCheckpointScopeKey
 import origon.example.android.services.exampleNewestEligibleMessageId
 import origon.example.android.services.exampleShouldAdvanceCheckpoint
+import origon.example.android.services.exampleStableKey
+import origon.example.android.services.exampleTranscriptDecision
 import origon.example.android.services.exampleUnreadAnchor
 import origon.example.android.services.pruneExampleCheckpoints
 import kotlin.test.Test
@@ -106,6 +109,33 @@ class ExampleCheckpointStoreTest {
 
         files.epoch = ByteArray(32) { 0x5A }
         assertNull(store.read(endpoint, "session", 80))
+    }
+
+    @Test
+    fun `stable keys and viewport receipt preserve reader intent`() {
+        val sending = Message(id = "", localId = "local", text = "sending")
+        val delivered = Message(id = "server", localId = "local", text = "sent")
+        assertEquals(sending.exampleStableKey(2), delivered.exampleStableKey(9))
+
+        assertEquals(
+            origon.example.android.services.ExampleTranscriptDecision(true, true),
+            exampleTranscriptDecision(
+                explicitSendPending = true,
+                outgoingKeysBeforeSend = setOf("old"),
+                outgoingKeysNow = setOf("old", "new"),
+                positioned = true,
+                wasAtTail = false,
+            ),
+        )
+        assertEquals(
+            origon.example.android.services.ExampleTranscriptDecision(false, false),
+            exampleTranscriptDecision(false, emptySet(), emptySet(), true, false),
+        )
+        assertEquals(
+            origon.example.android.services.ExampleTranscriptDecision(true, false),
+            exampleTranscriptDecision(false, emptySet(), emptySet(), true, true),
+        )
+        assertEquals("New messages", EXAMPLE_NEW_MESSAGES_ACCESSIBILITY_LABEL)
     }
 }
 

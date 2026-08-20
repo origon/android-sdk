@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
 
 internal const val EXAMPLE_CHECKPOINT_VERSION = 1
 internal const val EXAMPLE_CHECKPOINT_MAX_ENTRIES = 100
+internal const val EXAMPLE_NEW_MESSAGES_ACCESSIBILITY_LABEL = "New messages"
 internal val EXAMPLE_CHECKPOINT_MAX_AGE_MS: Long = TimeUnit.DAYS.toMillis(30)
 
 internal data class ExampleCheckpoint(
@@ -217,3 +218,23 @@ internal fun pruneExampleCheckpoints(records: List<ExampleCheckpoint>, now: Long
         .sortedByDescending(ExampleCheckpoint::lastAccessedAt)
         .take(EXAMPLE_CHECKPOINT_MAX_ENTRIES)
         .toList()
+
+internal data class ExampleTranscriptDecision(val followTail: Boolean, val consumeSend: Boolean)
+
+internal fun exampleTranscriptDecision(
+    explicitSendPending: Boolean,
+    outgoingKeysBeforeSend: Set<String>,
+    outgoingKeysNow: Set<String>,
+    positioned: Boolean,
+    wasAtTail: Boolean,
+): ExampleTranscriptDecision {
+    if (explicitSendPending && (outgoingKeysNow - outgoingKeysBeforeSend).isNotEmpty()) {
+        return ExampleTranscriptDecision(followTail = true, consumeSend = true)
+    }
+    return ExampleTranscriptDecision(followTail = positioned && wasAtTail, consumeSend = false)
+}
+
+internal fun Message.exampleStableKey(index: Int): String =
+    localId?.takeIf(String::isNotEmpty)?.let { "local-$it" }
+        ?: id.takeIf(String::isNotEmpty)?.let { "server-$it" }
+        ?: "index-$index"

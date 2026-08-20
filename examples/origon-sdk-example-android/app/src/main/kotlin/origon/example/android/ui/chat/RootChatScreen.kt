@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -53,9 +54,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -66,6 +69,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -96,6 +102,11 @@ import origon.example.android.R
 import origon.example.android.data.PendingAttachment
 import origon.example.android.services.ChatService
 import origon.example.android.services.ExampleEndpointPolicy
+import origon.example.android.services.EXAMPLE_NEW_MESSAGES_ACCESSIBILITY_LABEL
+import origon.example.android.services.exampleNewestEligibleMessageId
+import origon.example.android.services.exampleStableKey
+import origon.example.android.services.exampleTranscriptDecision
+import origon.example.android.services.exampleUnreadAnchor
 import origon.example.android.services.SDKManager
 import origon.example.android.ui.call.CallView
 import origon.example.android.ui.components.AttachmentsPreview
@@ -273,6 +284,7 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     val currentSessionId by chat.currentSessionId.collectAsState()
     val connectionState by chat.connectionState.collectAsState()
     val canSend by chat.canSend.collectAsState()
+    val focusedLoadState by chat.focusedLoadState.collectAsState()
     val serverConfig by sdk.serverConfig.collectAsState()
     val endpointPolicy = ExampleEndpointPolicy.from(serverConfig)
 
@@ -284,9 +296,11 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     val downloader = rememberAttachmentDownloader { error -> toast.show(error ?: "Saved") }
     val keyboard = LocalSoftwareKeyboardController.current
 
+    var foreground by remember { mutableStateOf(false) }
     LifecycleResumeEffect(chat) {
+        foreground = true
         chat.refetchFocusedSession()
-        onPauseOrDispose { }
+        onPauseOrDispose { foreground = false }
     }
 
     var draft by remember { mutableStateOf("") }
@@ -294,6 +308,35 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     var revealedKey by remember { mutableStateOf<String?>(null) }
     var callActive by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf<PreviewRequest?>(null) }
+    var explicitSendSequence by remember { mutableIntStateOf(0) }
+    var checkpointLoaded by remember { mutableStateOf(false) }
+    var checkpointLastSeenId by remember { mutableStateOf<String?>(null) }
+    var unreadAnchor by remember { mutableStateOf<Int?>(null) }
+    var anchorFixed by remember { mutableStateOf(false) }
+    var lastMarkedCandidate by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(currentSessionId, sdk.checkpointEndpoint) {
+        checkpointLoaded = false
+        checkpointLastSeenId = null
+        unreadAnchor = null
+        anchorFixed = false
+        lastMarkedCandidate = null
+        val id = currentSessionId ?: run {
+            checkpointLoaded = true
+            return@LaunchedEffect
+        }
+        checkpointLastSeenId = sdk.checkpoint(id)?.lastSeenMessageId
+        checkpointLoaded = true
+    }
+
+    val historyAuthoritative = focusedLoadState == ChatService.DestinationLoadState.NETWORK ||
+        focusedLoadState == ChatService.DestinationLoadState.FRESH_EMPTY
+    LaunchedEffect(checkpointLoaded, historyAuthoritative, messages.map { it.id to it.localId }) {
+        if (checkpointLoaded && historyAuthoritative && !anchorFixed) {
+            unreadAnchor = exampleUnreadAnchor(messages, checkpointLastSeenId)
+            anchorFixed = true
+        }
+    }
 
     /**
      * The row the sidebar picked, kept whole rather than as an id: the voice
@@ -412,6 +455,7 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     val send = {
         val text = draft.trim()
         if (text.isNotEmpty() || pending.isNotEmpty()) {
+            explicitSendSequence++
             scope.launch {
                 // Wait out any in-flight uploads so the send carries them.
                 if (chat.hasUploadingAttachments) {
@@ -504,6 +548,22 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                                             value = value,
                                             galleryLabel = galleryLabel,
                                         )
+                                    }
+                                },
+                                unreadAnchor = unreadAnchor,
+                                checkpointLoaded = checkpointLoaded,
+                                authoritative = historyAuthoritative,
+                                explicitSendSequence = explicitSendSequence,
+                                onLatestRowVisible = {
+                                    val id = currentSessionId
+                                    val candidate = exampleNewestEligibleMessageId(messages)
+                                    if (id != null && candidate != null && foreground &&
+                                        historyAuthoritative && candidate != lastMarkedCandidate
+                                    ) {
+                                        lastMarkedCandidate = candidate
+                                        scope.launch {
+                                            sdk.markCheckpointSeen(id, foreground = true, latestRowVisible = true)
+                                        }
                                     }
                                 },
                             )
@@ -758,14 +818,64 @@ private fun Transcript(
     promptSelection: (String) -> ChatService.PromptSelection?,
     /** `(promptId, cardIndex, label, value, galleryLabel)`. */
     onPromptReply: (String, Int?, String, String, String?) -> Unit,
+    unreadAnchor: Int?,
+    checkpointLoaded: Boolean,
+    authoritative: Boolean,
+    explicitSendSequence: Int,
+    onLatestRowVisible: () -> Unit,
 ) {
     val listState = rememberLazyListState()
+    var positioned by remember { mutableStateOf(false) }
+    var passiveWasAtTail by remember { mutableStateOf(true) }
+    var explicitPending by remember { mutableStateOf(false) }
+    var outgoingBeforeSend by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val outgoingNow = messages.mapIndexedNotNull { index, message ->
+        message.exampleStableKey(index).takeIf { message.role == ai.origon.sdk.MessageRole.EXTERNAL }
+    }.toSet()
+    val messageKeys = messages.mapIndexed { index, message -> message.exampleStableKey(index) }
+    val atTail by remember(messages.size, isTyping) {
+        derivedStateOf {
+            val lastMessage = messages.lastIndex
+            lastMessage < 0 || listState.layoutInfo.visibleItemsInfo.any { it.index == lastMessage }
+        }
+    }
 
-    // Follow the tail as rows land. Keyed on the count AND the typing row so a
-    // peer starting to type also scrolls into view.
-    LaunchedEffect(messages.size, isTyping) {
-        val last = messages.size - if (isTyping) 0 else 1
-        if (last >= 0) listState.animateScrollToItem(last.coerceAtLeast(0))
+    LaunchedEffect(explicitSendSequence) {
+        if (explicitSendSequence > 0) {
+            explicitPending = true
+            outgoingBeforeSend = outgoingNow
+        }
+    }
+
+    LaunchedEffect(checkpointLoaded, authoritative, unreadAnchor, messageKeys) {
+        if (!positioned && checkpointLoaded && authoritative) {
+            val target = unreadAnchor ?: messages.lastIndex
+            if (target >= 0) listState.scrollToItem(target)
+            positioned = true
+            passiveWasAtTail = unreadAnchor == null
+        }
+    }
+
+    LaunchedEffect(messageKeys) {
+        if (!positioned) return@LaunchedEffect
+        val decision = exampleTranscriptDecision(
+            explicitSendPending = explicitPending,
+            outgoingKeysBeforeSend = outgoingBeforeSend,
+            outgoingKeysNow = outgoingNow,
+            positioned = positioned,
+            wasAtTail = passiveWasAtTail,
+        )
+        if (decision.consumeSend) explicitPending = false
+        if (decision.followTail && messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+
+    LaunchedEffect(listState, messages.size) {
+        snapshotFlow { atTail }.collect { latest ->
+            passiveWasAtTail = latest
+            if (latest && messages.isNotEmpty()) onLatestRowVisible()
+        }
     }
 
     LazyColumn(
@@ -777,8 +887,9 @@ private fun Transcript(
         // Keyed on the message's stable key (`localId ?: id`): `MessageBubble`
         // holds position-memoized state, so an un-keyed list would bleed one
         // row's reveal state onto another as rows are inserted.
-        items(messages, key = { it.stableKey() }) { message ->
-            val key = message.stableKey()
+        itemsIndexed(messages, key = { index, message -> message.exampleStableKey(index) }) { index, message ->
+            if (index == unreadAnchor) NewMessagesDivider()
+            val key = message.exampleStableKey(index)
             val hasPrompt = message.buttons.isNotEmpty() || message.gallery.isNotEmpty()
             MessageBubble(
                 message = message,
@@ -806,15 +917,35 @@ private fun Transcript(
     }
 }
 
+@Composable
+private fun NewMessagesDivider() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = EXAMPLE_NEW_MESSAGES_ACCESSIBILITY_LABEL
+                heading()
+            },
+    ) {
+        Box(Modifier.weight(1f).height(1.dp).background(OrigonTheme.colors.border))
+        Text(
+            "NEW MESSAGES",
+            style = MaterialTheme.typography.labelSmall,
+            color = OrigonTheme.colors.textSecondary,
+        )
+        Box(Modifier.weight(1f).height(1.dp).background(OrigonTheme.colors.border))
+    }
+}
+
 /**
  * Outbound rows first appear with `localId` set and `id == ""`; the server id
  * lands on MessageUpdated. Prefer `localId` so the row tracks across
  * sending → delivered. Inbound rows have no `localId`, so `id` wins. Mirrors
  * `ChatService`'s own key.
  */
-private fun Message.stableKey(): String =
-    localId?.takeIf { it.isNotEmpty() } ?: id
-
 // ── Composer ─────────────────────────────────────────────────────────────
 
 private enum class AttachKind { MEDIA, FILE }

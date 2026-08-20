@@ -48,6 +48,9 @@ class SDKManager(private val appContext: Context) {
     val sessions: StateFlow<List<SessionSummary>> = _sessions.asStateFlow()
 
     private val configReplacement = ExampleConfigReplacement()
+    private val checkpointStore = ExampleCheckpointStore(NoBackupCheckpointFiles(appContext))
+    var checkpointEndpoint: String? = null
+        private set
     private val _serverConfig = MutableStateFlow<ExampleServerConfig?>(null)
     val serverConfig: StateFlow<ExampleServerConfig?> = _serverConfig.asStateFlow()
     val endpointPolicy: ExampleEndpointPolicy
@@ -91,6 +94,7 @@ class SDKManager(private val appContext: Context) {
             return
         }
         client = newClient
+        checkpointEndpoint = endpoint
         _serverConfig.value = cachedConfig
         chat.clientDidChange()
         _isReady.value = true
@@ -106,7 +110,37 @@ class SDKManager(private val appContext: Context) {
         _sessions.value = emptyList()
         client?.close()
         client = null
+        checkpointEndpoint = null
         _isReady.value = false
+    }
+
+    internal suspend fun checkpoint(sessionId: String): ExampleCheckpoint? {
+        val endpoint = checkpointEndpoint ?: return null
+        return runCatching {
+            checkpointStore.read(endpoint, sessionId, System.currentTimeMillis())
+        }.getOrNull()
+    }
+
+    internal suspend fun markCheckpointSeen(
+        sessionId: String,
+        foreground: Boolean,
+        latestRowVisible: Boolean,
+    ) {
+        val endpoint = checkpointEndpoint ?: return
+        val load = chat.focusedLoadState.value
+        runCatching {
+            checkpointStore.markSeen(
+                endpoint = endpoint,
+                sessionId = sessionId,
+                messageId = exampleNewestEligibleMessageId(chat.messages.value),
+                authoritative = load == ChatService.DestinationLoadState.NETWORK ||
+                    load == ChatService.DestinationLoadState.FRESH_EMPTY,
+                foreground = foreground,
+                detailVisible = chat.currentSessionId.value == sessionId,
+                latestRowVisible = latestRowVisible,
+                now = System.currentTimeMillis(),
+            )
+        }
     }
 
     // MARK: - Sessions (shared between call and chat)
