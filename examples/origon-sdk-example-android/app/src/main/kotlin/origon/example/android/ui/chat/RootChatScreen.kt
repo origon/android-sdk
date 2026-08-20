@@ -83,6 +83,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.foundation.layout.width
@@ -92,6 +93,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.traversalIndex
+import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -952,10 +959,37 @@ private fun NewMessagesDivider() {
  */
 // ── Composer ─────────────────────────────────────────────────────────────
 
-private enum class AttachKind { MEDIA, FILE }
+internal enum class AttachKind { MEDIA, FILE }
+
+internal enum class ExampleComposerPrimary { SEND, START_CALL }
+
+internal data class ExampleComposerPolicy(
+    val primary: ExampleComposerPrimary,
+    val label: String,
+    val enabled: Boolean,
+)
+
+internal fun exampleComposerPolicy(
+    hasContent: Boolean,
+    voiceActionEnabled: Boolean,
+    transportEnabled: Boolean,
+    sending: Boolean,
+): ExampleComposerPolicy {
+    val primary = if (!hasContent && voiceActionEnabled) {
+        ExampleComposerPrimary.START_CALL
+    } else {
+        ExampleComposerPrimary.SEND
+    }
+    return ExampleComposerPolicy(
+        primary = primary,
+        label = if (primary == ExampleComposerPrimary.START_CALL) "Start a call" else "Send message",
+        enabled = transportEnabled && !sending &&
+            (hasContent || primary == ExampleComposerPrimary.START_CALL),
+    )
+}
 
 @Composable
-private fun Composer(
+internal fun Composer(
     draft: String,
     onDraftChange: (String) -> Unit,
     pending: List<PendingAttachment>,
@@ -973,6 +1007,8 @@ private fun Composer(
     var menuOpen by remember { mutableStateOf(false) }
     val attachInteraction = remember { MutableInteractionSource() }
     val sendInteraction = remember { MutableInteractionSource() }
+    val haptic = LocalHapticFeedback.current
+    val policy = exampleComposerPolicy(hasContent, voiceActionEnabled, enabled, sending)
 
     Column(
         Modifier
@@ -996,18 +1032,23 @@ private fun Composer(
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().semantics { isTraversalGroup = true },
         ) {
             if (allowMedia || allowFiles) Box {
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(44.dp)
+                        .semantics {
+                            role = Role.Button
+                            contentDescription = "Add attachment"
+                            traversalIndex = 1f
+                        }
                         .clickable(
                             interactionSource = attachInteraction,
                             indication = null,
                             enabled = enabled,
-                            onClickLabel = "Attach",
+                            onClickLabel = "Add attachment",
                             onClick = { menuOpen = true },
                         ),
                 ) {
@@ -1043,7 +1084,14 @@ private fun Composer(
                     .copy(color = OrigonTheme.colors.textPrimary),
                 cursorBrush = SolidColor(OrigonTheme.colors.textPrimary),
                 enabled = enabled,
-                modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 44.dp)
+                    .padding(horizontal = 4.dp)
+                    .semantics {
+                        contentDescription = "Message"
+                        traversalIndex = 2f
+                    },
                 decorationBox = { field ->
                     Box(contentAlignment = Alignment.CenterStart) {
                         if (draft.isEmpty()) {
@@ -1061,23 +1109,31 @@ private fun Composer(
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primary)
                     .clickable(
                         interactionSource = sendInteraction,
                         indication = null,
-                        enabled = enabled && !sending && (hasContent || voiceActionEnabled),
-                        onClickLabel = if (hasContent) "Send" else "Start a call",
-                        onClick = { if (hasContent) onSend() else onStartCall() },
-                    ),
+                        enabled = policy.enabled,
+                        onClickLabel = policy.label,
+                        role = Role.Button,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            if (policy.primary == ExampleComposerPrimary.SEND) onSend() else onStartCall()
+                        },
+                    )
+                    .semantics {
+                        contentDescription = policy.label
+                        traversalIndex = 3f
+                    },
             ) {
                 if (sending) {
                     OrigonSpinner(MaterialTheme.colorScheme.onPrimary)
                 } else {
                     Icon(
                         painterResource(
-                            if (hasContent || !voiceActionEnabled) R.drawable.ic_send else R.drawable.ic_voice,
+                            if (policy.primary == ExampleComposerPrimary.SEND) R.drawable.ic_send else R.drawable.ic_voice,
                         ),
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onPrimary,

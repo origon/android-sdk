@@ -11,6 +11,9 @@ import origon.example.android.ui.components.ExampleRichText
 import origon.example.android.ui.components.ExampleGalleryPolicy
 import origon.example.android.ui.components.exampleMessageAuthor
 import origon.example.android.ui.components.exampleShouldShowAuthor
+import origon.example.android.ui.chat.ExampleComposerPolicy
+import origon.example.android.ui.chat.ExampleComposerPrimary
+import origon.example.android.ui.chat.exampleComposerPolicy
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -67,6 +70,17 @@ class RichTextTest {
         )))
         assertEquals(280, ExampleGalleryPolicy.CARD_WIDTH_DP)
         assertEquals(listOf(0, 1, 2), listOf("same", "same", "same").indices.toList())
+    }
+
+    @Test fun composerRoleLabelAndTransportMatrix() {
+        assertEquals(
+            ExampleComposerPolicy(ExampleComposerPrimary.START_CALL, "Start a call", true),
+            exampleComposerPolicy(false, true, true, false),
+        )
+        assertEquals("Send message", exampleComposerPolicy(true, true, true, false).label)
+        assertFalse(exampleComposerPolicy(true, false, false, false).enabled)
+        assertFalse(exampleComposerPolicy(false, false, true, false).enabled)
+        assertFalse(exampleComposerPolicy(true, true, true, true).enabled)
     }
 
     private fun visible(blocks: List<ExampleRichBlock>) = blocks.joinToString("") {
