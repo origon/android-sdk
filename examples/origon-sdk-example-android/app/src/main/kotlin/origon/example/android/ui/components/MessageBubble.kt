@@ -256,10 +256,11 @@ private fun BubbleBody(
                         // walk that option's edge, otherwise tapping a link
                         // would strand the conversation on a waiter that never
                         // resolves.
-                        if (button.buttonType == "url" && button.value.isNotEmpty()) {
+                        val safeUrl = examplePromptUrl(button.buttonType, button.value)
+                        if (safeUrl != null) {
                             runCatching {
                                 context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, button.value.toUri()),
+                                    Intent(Intent.ACTION_VIEW, safeUrl.toUri()),
                                 )
                             }.onFailure { Log.w(TAG, "couldn't open ${button.value}: $it") }
                         }
@@ -320,6 +321,9 @@ private fun BubbleBody(
         }
     }
 }
+
+internal fun examplePromptUrl(buttonType: String?, value: String): String? =
+    if (buttonType == "url") ExampleRichText.safeHttpUrl(value) else null
 
 internal data class ExampleMessageAuthor(val key: String, val displayName: String)
 

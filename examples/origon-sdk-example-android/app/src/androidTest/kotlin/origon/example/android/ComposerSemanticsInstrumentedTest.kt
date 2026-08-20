@@ -6,6 +6,9 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.assertEquals
@@ -42,13 +45,15 @@ class ComposerSemanticsInstrumentedTest {
 
     @Test fun emptyComposerAdvertisesStartCallOnlyWhenConfigured() {
         compose.setContent {
-            OrigonTheme {
-                Composer(
-                    draft = "", onDraftChange = {}, pending = emptyList(),
-                    onRemovePending = {}, sending = false, hasContent = false,
-                    onAttach = {}, onSend = {}, onStartCall = {}, enabled = true,
-                    allowMedia = false, allowFiles = false, voiceActionEnabled = true,
-                )
+            CompositionLocalProvider(LocalDensity provides Density(density = 1f, fontScale = 2f)) {
+                OrigonTheme(darkTheme = true) {
+                    Composer(
+                        draft = "", onDraftChange = {}, pending = emptyList(),
+                        onRemovePending = {}, sending = false, hasContent = false,
+                        onAttach = {}, onSend = {}, onStartCall = {}, enabled = true,
+                        allowMedia = false, allowFiles = false, voiceActionEnabled = true,
+                    )
+                }
             }
         }
         compose.onNodeWithContentDescription("Start a call").assertIsEnabled()

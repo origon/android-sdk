@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import origon.example.android.ui.components.ExampleRichBlock
 import origon.example.android.ui.components.ExampleRichText
+import origon.example.android.ui.components.examplePromptUrl
 import origon.example.android.ui.components.ExampleGalleryPolicy
 import origon.example.android.ui.components.exampleMessageAuthor
 import origon.example.android.ui.components.exampleShouldShowAuthor
@@ -31,6 +32,10 @@ class RichTextTest {
         assertEquals("https://example.invalid/a", ExampleRichText.safeHttpUrl("HTTPS://example.invalid/a"))
         assertNull(ExampleRichText.safeHttpUrl("javascript://alert"))
         assertNull(ExampleRichText.safeHttpUrl("intent://payload"))
+        assertNull(ExampleRichText.safeHttpUrl("http:///missing-host"))
+        assertEquals("https://example.invalid", examplePromptUrl("url", "https://example.invalid"))
+        assertNull(examplePromptUrl("url", "javascript:alert(1)"))
+        assertNull(examplePromptUrl("postback", "https://example.invalid"))
     }
 
     @Test fun hostileCapsAndMalformedInputUseBoundedFallback() {

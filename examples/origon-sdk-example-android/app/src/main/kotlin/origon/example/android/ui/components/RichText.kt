@@ -41,6 +41,7 @@ import org.commonmark.parser.Parser
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.TextNode
+import java.net.URI
 
 internal sealed interface ExampleRichBlock {
     data class Paragraph(val text: AnnotatedString) : ExampleRichBlock
@@ -259,10 +260,11 @@ internal object ExampleRichText {
     }
 
     fun safeHttpUrl(raw: String): String? {
-        val mark = raw.indexOf("://")
-        if (mark <= 0 || mark + 3 >= raw.length) return null
-        val scheme = raw.substring(0, mark).lowercase()
-        return if (scheme == "http" || scheme == "https") scheme + raw.substring(mark) else null
+        val parsed = runCatching { URI(raw) }.getOrNull() ?: return null
+        val scheme = parsed.scheme?.lowercase() ?: return null
+        if ((scheme != "http" && scheme != "https") || parsed.host.isNullOrBlank()) return null
+        val mark = raw.indexOf(':')
+        return scheme + raw.substring(mark)
     }
 
     private fun plain(text: String): List<ExampleRichBlock> =
