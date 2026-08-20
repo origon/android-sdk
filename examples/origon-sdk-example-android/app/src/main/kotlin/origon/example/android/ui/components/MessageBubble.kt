@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,6 +49,8 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -85,8 +88,10 @@ import kotlin.math.min
  * to the screen, so this component exposes the affordances and owns neither.
  */
 @Composable
-fun MessageBubble(
+internal fun MessageBubble(
     message: Message,
+    author: ExampleMessageAuthor = exampleMessageAuthor(message),
+    showsAuthor: Boolean = true,
     revealed: Boolean,
     onToggleRevealed: () -> Unit,
     onAttachmentTap: (Int) -> Unit,
@@ -105,6 +110,8 @@ fun MessageBubble(
     } else {
         BubbleBody(
             message = message,
+            author = author,
+            showsAuthor = showsAuthor,
             revealed = revealed,
             onToggleRevealed = onToggleRevealed,
             onAttachmentTap = onAttachmentTap,
@@ -151,6 +158,8 @@ private fun DividerLine(modifier: Modifier = Modifier) {
 @Composable
 private fun BubbleBody(
     message: Message,
+    author: ExampleMessageAuthor,
+    showsAuthor: Boolean,
     revealed: Boolean,
     onToggleRevealed: () -> Unit,
     onAttachmentTap: (Int) -> Unit,
@@ -190,6 +199,16 @@ private fun BubbleBody(
                 onClick = onToggleRevealed,
             ),
         ) {
+            if (showsAuthor) {
+                Text(
+                    author.displayName,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = OrigonTheme.colors.textSecondary,
+                    modifier = Modifier
+                        .padding(bottom = 4.dp)
+                        .semantics { contentDescription = "Message from ${author.displayName}" },
+                )
+            }
             if (hasText) {
                 ExampleRichMessageText(
                     blocks = rich,
@@ -214,17 +233,15 @@ private fun BubbleBody(
             }
 
             message.attachments.forEachIndexed { index, attachment ->
-                AttachmentRow(
-                    attachment = attachment,
-                    isSelfUser = isSelfUser,
-                    onTap = { onAttachmentTap(index) },
-                    onDownload = { onDownloadAttachment(attachment) },
-                    // iOS VStack spacing 6; the first row sits flush when no
-                    // text bubble precedes it.
-                    modifier = Modifier.padding(
-                        top = if (index == 0 && !hasText) 0.dp else 6.dp,
-                    ),
-                )
+                key(attachment.id.ifBlank { "attachment-$index" }) {
+                    AttachmentRow(
+                        attachment = attachment,
+                        isSelfUser = isSelfUser,
+                        onTap = { onAttachmentTap(index) },
+                        onDownload = { onDownloadAttachment(attachment) },
+                        modifier = Modifier.padding(top = if (index == 0 && !hasText) 0.dp else 6.dp),
+                    )
+                }
             }
 
             // Interactive prompt options, below the text bubble. A prompt rides
@@ -302,6 +319,24 @@ private fun BubbleBody(
             }
         }
     }
+}
+
+internal data class ExampleMessageAuthor(val key: String, val displayName: String)
+
+internal fun exampleMessageAuthor(message: Message): ExampleMessageAuthor = when (message.role) {
+    MessageRole.EXTERNAL -> ExampleMessageAuthor("self", message.userName?.trim()?.takeIf(String::isNotEmpty) ?: "You")
+    MessageRole.USER -> {
+        val name = message.userName?.trim()?.takeIf(String::isNotEmpty)
+        val identity = message.userId?.trim()?.takeIf(String::isNotEmpty) ?: name ?: "agent"
+        ExampleMessageAuthor("agent:${identity.lowercase()}", name ?: "Agent")
+    }
+    MessageRole.AI, MessageRole.SYSTEM -> ExampleMessageAuthor("assistant", "Assistant")
+}
+
+internal fun exampleShouldShowAuthor(message: Message, previous: Message?): Boolean {
+    if (!message.action.isNullOrEmpty()) return false
+    if (previous == null || !previous.action.isNullOrEmpty()) return true
+    return exampleMessageAuthor(message).key != exampleMessageAuthor(previous).key
 }
 
 // ── Attachment row ───────────────────────────────────────────────────────

@@ -111,6 +111,8 @@ import origon.example.android.services.SDKManager
 import origon.example.android.ui.call.CallView
 import origon.example.android.ui.components.AttachmentsPreview
 import origon.example.android.ui.components.MessageBubble
+import origon.example.android.ui.components.exampleMessageAuthor
+import origon.example.android.ui.components.exampleShouldShowAuthor
 import origon.example.android.ui.components.OrigonSpinner
 import origon.example.android.ui.components.PrimaryButton
 import origon.example.android.ui.components.SessionHeader
@@ -893,6 +895,8 @@ private fun Transcript(
             val hasPrompt = message.buttons.isNotEmpty() || message.gallery.isNotEmpty()
             MessageBubble(
                 message = message,
+                author = exampleMessageAuthor(message),
+                showsAuthor = exampleShouldShowAuthor(message, messages.getOrNull(index - 1)),
                 revealed = revealedKey == key,
                 onToggleRevealed = { onToggleRevealed(key) },
                 onAttachmentTap = { index -> onAttachmentTap(message, index) },

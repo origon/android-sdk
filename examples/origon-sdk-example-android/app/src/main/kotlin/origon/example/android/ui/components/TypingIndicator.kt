@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -55,7 +57,7 @@ fun TypingIndicator(modifier: Modifier = Modifier) {
         ),
         label = "phase",
     )
-    Row(modifier = modifier.fillMaxWidth()) {
+    Row(modifier = modifier.fillMaxWidth().semantics { contentDescription = "Assistant is typing" }) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(5.dp),
             modifier = Modifier

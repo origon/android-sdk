@@ -1,9 +1,16 @@
 package origon.example.android
 
+import ai.origon.sdk.Attachment
+import ai.origon.sdk.Message
+import ai.origon.sdk.MessageCard
+import ai.origon.sdk.MessageRole
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import origon.example.android.ui.components.ExampleRichBlock
 import origon.example.android.ui.components.ExampleRichText
+import origon.example.android.ui.components.ExampleGalleryPolicy
+import origon.example.android.ui.components.exampleMessageAuthor
+import origon.example.android.ui.components.exampleShouldShowAuthor
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -41,6 +48,25 @@ class RichTextTest {
         assertTrue(blocks.any { it is ExampleRichBlock.ListRow })
         assertTrue(blocks.any { it is ExampleRichBlock.CodeBlock })
         assertFalse(visible(blocks).isEmpty())
+    }
+
+    @Test fun authorRunsAndStableGalleryMediaPolicy() {
+        val first = Message(role = MessageRole.USER, id = "1", text = "a", userId = "agent", userName = "Pat")
+        val repeated = Message(role = MessageRole.USER, id = "2", text = "b", userId = "agent", userName = "Pat")
+        val self = Message(role = MessageRole.EXTERNAL, id = "3", text = "c")
+        val lifecycle = Message(role = MessageRole.SYSTEM, id = "4", text = "joined", action = "joined")
+        assertTrue(exampleShouldShowAuthor(first, null))
+        assertFalse(exampleShouldShowAuthor(repeated, first))
+        assertTrue(exampleShouldShowAuthor(self, repeated))
+        assertFalse(exampleShouldShowAuthor(lifecycle, self))
+        assertEquals("Pat", exampleMessageAuthor(first).displayName)
+        assertEquals("You", exampleMessageAuthor(self).displayName)
+        assertNull(ExampleGalleryPolicy.imageUrl(MessageCard(title = "missing")))
+        assertNull(ExampleGalleryPolicy.imageUrl(MessageCard(
+            title = "unsafe", image = Attachment(url = "intent://payload"),
+        )))
+        assertEquals(280, ExampleGalleryPolicy.CARD_WIDTH_DP)
+        assertEquals(listOf(0, 1, 2), listOf("same", "same", "same").indices.toList())
     }
 
     private fun visible(blocks: List<ExampleRichBlock>) = blocks.joinToString("") {

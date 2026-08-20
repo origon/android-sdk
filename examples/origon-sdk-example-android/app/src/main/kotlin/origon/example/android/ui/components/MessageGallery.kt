@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,7 +45,14 @@ import origon.example.android.ui.theme.OrigonTheme
  * more. This cap keeps the next card peeking, which is the affordance that says
  * "scrollable".
  */
-private val CardWidth = 280.dp
+internal object ExampleGalleryPolicy {
+    const val CARD_WIDTH_DP = 280
+    const val CARD_SPACING_DP = 16
+    fun imageUrl(card: MessageCard): String? =
+        card.image?.url?.takeIf { ExampleRichText.safeHttpUrl(it) != null }
+}
+
+private val CardWidth = ExampleGalleryPolicy.CARD_WIDTH_DP.dp
 private val CardImageHeight = 150.dp
 private val CardShape = RoundedCornerShape(14.dp)
 
@@ -77,19 +85,21 @@ fun MessageGallery(
 ) {
     val scroll = rememberScrollState()
     Row(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(ExampleGalleryPolicy.CARD_SPACING_DP.dp),
         modifier = modifier
             .fillMaxWidth()
             .horizontalScroll(scroll)
             .height(IntrinsicSize.Max),
     ) {
         cards.forEachIndexed { cardIndex, card ->
-            GalleryCard(
-                card = card,
-                isLive = isLive,
-                isSelected = { button -> selection.matches(cardIndex, button) },
-                onTap = { button -> onTap(cardIndex, card, button) },
-            )
+            key(cardIndex) {
+                GalleryCard(
+                    card = card,
+                    isLive = isLive,
+                    isSelected = { button -> selection.matches(cardIndex, button) },
+                    onTap = { button -> onTap(cardIndex, card, button) },
+                )
+            }
         }
     }
 }
@@ -129,7 +139,7 @@ private fun GalleryCard(
         // `image` is legitimately null — the server emits null for a card
         // authored without one. Unwrapping it unconditionally would take down
         // the whole carousel, not just this card.
-        val imageUrl = card.image?.url
+        val imageUrl = ExampleGalleryPolicy.imageUrl(card)
         if (!imageUrl.isNullOrEmpty()) {
             Box(
                 Modifier
