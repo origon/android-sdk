@@ -1,4 +1,7 @@
 import com.vanniktech.maven.publish.SonatypeHost
+import java.security.MessageDigest
+import org.gradle.api.publish.PublishingExtension
+import org.gradle.api.publish.maven.MavenPublication
 
 plugins {
     id("com.android.library")
@@ -93,6 +96,101 @@ mavenPublishing {
             url.set("https://github.com/Origon/android-sdk")
             connection.set("scm:git:git://github.com/Origon/android-sdk.git")
             developerConnection.set("scm:git:ssh://git@github.com/Origon/android-sdk.git")
+        }
+    }
+}
+
+// Exact-artifact release mode. Normal local and Central publication keep using
+// AGP's release component. A release operator opts into this mode only after a
+// candidate AAR has been built, inspected, and hashed: the unclassified AAR
+// artifact is replaced with that exact file while sources/javadoc artifacts and
+// the generated POM remain owned by the normal publication. Because the custom
+// file has no build dependency, Gradle cannot rebuild it during upload.
+val exactAarPath = providers.gradleProperty("exactAarPath")
+val exactAarSha256 = providers.gradleProperty("exactAarSha256")
+require(exactAarPath.isPresent == exactAarSha256.isPresent) {
+    "exactAarPath and exactAarSha256 must be supplied together"
+}
+
+if (exactAarPath.isPresent) {
+    require(providers.gradleProperty("sdkVersion").isPresent) {
+        "exact AAR mode requires an explicit sdkVersion"
+    }
+    val exactAar = file(exactAarPath.get()).canonicalFile
+    val expectedSha256 = exactAarSha256.get().lowercase()
+    require(exactAar.isFile) { "exact release AAR does not exist: $exactAar" }
+    require(expectedSha256.matches(Regex("[0-9a-f]{64}"))) {
+        "exactAarSha256 must be one lowercase SHA-256"
+    }
+
+    afterEvaluate {
+        val publications = extensions
+            .getByType(PublishingExtension::class.java)
+            .publications
+            .withType(MavenPublication::class.java)
+        require(publications.isNotEmpty()) { "no Maven publication was configured" }
+        publications.configureEach {
+            require(groupId == "ai.origon" && artifactId == "sdk") {
+                "exact AAR mode refuses unexpected coordinates: $groupId:$artifactId:$version"
+            }
+            artifacts.removeAll { artifact ->
+                artifact.extension == "aar" && artifact.classifier.isNullOrBlank()
+            }
+            artifact(exactAar) {
+                extension = "aar"
+            }
+        }
+
+        val verifyExactAarPublication = tasks.register("verifyExactAarPublication") {
+            group = "publishing"
+            description = "Verifies the exact prebuilt AAR and no-rebuild publication wiring."
+            inputs.file(exactAar)
+            doLast { verificationTask ->
+                val digest = MessageDigest.getInstance("SHA-256")
+                exactAar.inputStream().use { input ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        digest.update(buffer, 0, count)
+                    }
+                }
+                val actual = digest.digest().joinToString("") {
+                    "%02x".format(it.toInt() and 0xff)
+                }
+                check(actual == expectedSha256) {
+                    "exact AAR SHA-256 changed: expected $expectedSha256, found $actual"
+                }
+                publications.forEach { publication ->
+                    check(publication.groupId == "ai.origon")
+                    check(publication.artifactId == "sdk")
+                    check(publication.version == providers.gradleProperty("sdkVersion").get())
+                    val mainAars = publication.artifacts.filter { artifact ->
+                        artifact.extension == "aar" && artifact.classifier.isNullOrBlank()
+                    }
+                    check(mainAars.size == 1 && mainAars.single().file.canonicalFile == exactAar) {
+                        "publication is not bound to the exact AAR: $mainAars"
+                    }
+                    check(
+                        mainAars.single().buildDependencies
+                            .getDependencies(verificationTask)
+                            .isEmpty()
+                    ) {
+                        "exact AAR unexpectedly has build dependencies"
+                    }
+                }
+                println(
+                    "verified exact publication ai.origon:sdk:${providers.gradleProperty("sdkVersion").get()} " +
+                        "aar=$actual no-rebuild=true"
+                )
+            }
+        }
+
+        tasks.matching { task ->
+            task.name.contains("publish", ignoreCase = true) ||
+                task.name.contains("MavenCentral", ignoreCase = true)
+        }.configureEach {
+            dependsOn(verifyExactAarPublication)
         }
     }
 }

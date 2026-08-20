@@ -32,6 +32,24 @@ class MobileContinuityTest {
     }
 
     @Test
+    fun messageDecodesAudienceMetadataAndDefaultsLegacyRowsToAll() {
+        val internalRow = """{"id":"m1","metadata":{"audience":"internal"}}"""
+        assertEquals(
+            MessageAudience.INTERNAL,
+            json.decodeFromString<Message>(internalRow).metadata.audience,
+        )
+
+        val legacyRow = """{"id":"m2"}"""
+        assertEquals(
+            MessageAudience.ALL,
+            json.decodeFromString<Message>(legacyRow).metadata.audience,
+        )
+
+        val unknown = """{"id":"m3","metadata":{"audience":"staff"}}"""
+        assertFails { json.decodeFromString<Message>(unknown) }
+    }
+
+    @Test
     fun restoreStatusAndGenerationAreClosed() {
         assertEquals(RestoreStatus.CONNECTED, restoreStatus(0))
         assertEquals(RestoreStatus.FAILED, restoreStatus(99))

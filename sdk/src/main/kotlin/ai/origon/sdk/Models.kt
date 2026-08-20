@@ -70,6 +70,22 @@ enum class MessageState {
     @SerialName("completed") COMPLETED,
 }
 
+/** Delivery audience stamped by the chat server on every transcript row. */
+@Serializable
+enum class MessageAudience {
+    /** Visible only to attached internal agents and supervisors. */
+    @SerialName("internal") INTERNAL,
+    /** Visible to internal participants and the external visitor. */
+    @SerialName("all") ALL,
+}
+
+/** Typed server metadata carried by every [Message]. */
+@Serializable
+data class MessageMetadata(
+    /** Defaults to [MessageAudience.ALL] for source-compatible local messages. */
+    val audience: MessageAudience = MessageAudience.ALL,
+)
+
 /**
  * Audio output route override for a voice call — the "speakerphone" concept,
  * distinct from device selection. Android applies it via `AudioManager`
@@ -373,6 +389,11 @@ data class Message(
     val errorText: String? = null,
     val status: MessageStatus = MessageStatus.DELIVERED,
     val state: MessageState = MessageState.COMPLETED,
+    /**
+     * Server-stamped delivery classification. Kept last so existing positional
+     * constructors remain source-compatible and default to `ALL`.
+     */
+    val metadata: MessageMetadata = MessageMetadata(),
 )
 
 /** Payload for [OrigonClient.sendMessage]. Mirrors the Rust `SendMessagePayload` shape. */

@@ -29,9 +29,10 @@ sync, pick a device, and Run.
 
 ### Command line (no Android Studio)
 
-Publish the sibling SDK to Maven Local first (`./gradlew
-:sdk:publishToMavenLocal` from the android-sdk root); this example intentionally
-resolves `ai.origon:sdk:0.0.0-LOCAL` during source validation.
+The example defaults to the released `ai.origon:sdk:0.3.0`. For source
+validation, publish a uniquely versioned sibling SDK to Maven Local and select
+that exact version with `-PorigonSdkVersion`; this prevents a stale generic
+local artifact from satisfying the gate.
 
 ```bash
 brew install openjdk@21
@@ -40,7 +41,11 @@ sdkmanager "platform-tools" "build-tools;37.0.0" "platforms;android-37" \
   "ndk;27.2.12479018"
 
 cd android-sdk/examples/origon-sdk-example-android
-./run.sh
+./gradlew :app:dependencyInsight --dependency ai.origon:sdk \
+  --configuration debugRuntimeClasspath \
+  -PorigonSdkVersion=0.4.0-LOCAL-LCM
+./gradlew :app:assembleDebug :app:lint \
+  -PorigonSdkVersion=0.4.0-LOCAL-LCM
 ```
 
 `run.sh` auto-detects `ANDROID_HOME` and pins a compatible JDK, builds the
@@ -69,19 +74,23 @@ To wire OrigonSDK into your own app, start with these files:
 
 ## SDK dependency
 
-This source-validation example consumes the SDK artifact staged in Maven Local:
+The example's released default stays pinned in source, while the explicit
+property selects an exact candidate already staged in Maven Local:
 
 ```kotlin
 // settings.gradle.kts → dependencyResolutionManagement.repositories
 mavenLocal()
 
 // app/build.gradle.kts
-implementation("ai.origon:sdk:0.0.0-LOCAL")
+val origonSdkVersion = providers.gradleProperty("origonSdkVersion")
+    .getOrElse("0.3.0")
+implementation("ai.origon:sdk:$origonSdkVersion")
 ```
 
-Run `./gradlew :sdk:publishToMavenLocal` from the android-sdk root before
-building the example. For a published consumer, remove `mavenLocal()` and use
-the current released `ai.origon:sdk:<version>` coordinate from Maven Central.
+Run `./gradlew :sdk:publishToMavenLocal -PsdkVersion=<unique-version>` from the
+android-sdk root before selecting the same value with
+`-PorigonSdkVersion=<unique-version>`. Omitting the property continues to use
+the tracked Maven Central release pin.
 
 Two extra notes for SDK consumers (both are worked around in this example):
 

@@ -17,6 +17,19 @@ registers cross-repository contracts that must change and validate together.
   in `/home/yl/workspace/apps/sdk/CONTRACT.md`. This wrapper adds no alternate
   envelope or persistence.
 
+## Live-chat audience metadata
+
+- The wrapper mirrors apps/sdk's typed `Message.metadata.audience` as
+  `MessageMetadata(audience: MessageAudience)`. The two accepted wire values
+  are `internal` and `all`; an unknown value fails decoding. Consumer-created
+  messages and legacy cached JSON with no metadata remain source-compatible and
+  default to `all`, while the Rust SDK still requires metadata on every new
+  server row before it reaches this wrapper.
+- Canonical wire production and validation are registered in
+  `/home/yl/workspace/platform/cx/CONTRACT.md` and
+  `/home/yl/workspace/apps/sdk/CONTRACT.md`. This wrapper only decodes the
+  already-authorized projection and never chooses or rewrites the audience.
+
 ## Mobile chat continuity and push
 
 - The wrapper supplies JNI `initialize` with a canonical lowercase UUIDv4 generated
@@ -99,3 +112,15 @@ absent while all current JNI exports remain in `.dynsym`, and 64-bit PT_LOAD
 segments must remain 0x4000-aligned. Wrapper tests and the example compile must
 pass against the local AAR. Do not publish to Maven Central during an
 implementation spin.
+
+For an owner-authorized exact-artifact release, Gradle properties
+`exactAarPath`, `exactAarSha256`, and explicit `sdkVersion` replace only the
+publication's unclassified AAR with the already-validated file. The exact file
+has no build dependency; normal POM/source/javadoc artifacts remain. The
+`verifyExactAarPublication` task rechecks the SHA-256, coordinate
+`ai.origon:sdk:<version>`, unique AAR binding, and empty build dependency before
+any publish task. `scripts/verify-exact-release-aar.sh` additionally requires
+the recorded hash of all three embedded libraries and runs the complete
+stripped/JNI/retired-symbol/alignment verifier. The workspace release driver
+must reject a Central dry-run containing any compile/assemble/AAR bundle/native
+merge/strip task before an owner may authorize upload.

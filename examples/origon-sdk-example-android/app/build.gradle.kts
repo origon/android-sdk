@@ -6,6 +6,13 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val origonSdkVersion = providers.gradleProperty("origonSdkVersion")
+    .getOrElse("0.3.0")
+    .trim()
+require(origonSdkVersion.isNotEmpty() && !origonSdkVersion.any(Char::isWhitespace)) {
+    "origonSdkVersion must be one exact, nonblank Maven version"
+}
+
 android {
     namespace = "origon.example.android"
     // compileSdk 37 / targetSdk 36 — the pairing `apps/android` already
@@ -61,7 +68,7 @@ android {
 }
 
 dependencies {
-    implementation("ai.origon:sdk:0.3.0")
+    implementation("ai.origon:sdk:$origonSdkVersion")
     // ClientConfig exposes a kotlinx JsonObject in its public API but the
     // SDK declares the dependency as `implementation`, so consumers must
     // add it explicitly to satisfy the compiler.
