@@ -6,6 +6,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val origonSdkVersion = providers.gradleProperty("origonSdkVersion").getOrElse("0.3.0")
+
 android {
     namespace = "origon.example.android"
     // compileSdk 37 / targetSdk 36 — the pairing `apps/android` already
@@ -25,6 +27,7 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildFeatures {
@@ -61,7 +64,7 @@ android {
 }
 
 dependencies {
-    implementation("ai.origon:sdk:0.3.0")
+    implementation("ai.origon:sdk:$origonSdkVersion")
     // ClientConfig exposes a kotlinx JsonObject in its public API but the
     // SDK declares the dependency as `implementation`, so consumers must
     // add it explicitly to satisfy the compiler.
@@ -98,4 +101,9 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.4.0")
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+
+    testImplementation("org.jetbrains.kotlin:kotlin-test-junit:2.4.10")
+    androidTestImplementation("androidx.test:core:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
 }

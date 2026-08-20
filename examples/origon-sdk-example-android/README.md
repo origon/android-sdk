@@ -29,9 +29,20 @@ sync, pick a device, and Run.
 
 ### Command line (no Android Studio)
 
-Publish the sibling SDK to Maven Local first (`./gradlew
-:sdk:publishToMavenLocal` from the android-sdk root); this example intentionally
-resolves `ai.origon:sdk:0.0.0-LOCAL` during source validation.
+The example defaults to released SDK `0.3.0`. To validate a sibling SDK build,
+publish it under a unique local version and select the same version explicitly:
+
+```bash
+cd android-sdk
+./gradlew :sdk:publishToMavenLocal -PsdkVersion=0.3.0-LOCAL-PARITY
+cd examples/origon-sdk-example-android
+./gradlew :app:dependencyInsight \
+  --dependency ai.origon:sdk \
+  --configuration debugRuntimeClasspath \
+  -PorigonSdkVersion=0.3.0-LOCAL-PARITY
+./gradlew :app:testDebugUnitTest :app:connectedDebugAndroidTest \
+  -PorigonSdkVersion=0.3.0-LOCAL-PARITY
+```
 
 ```bash
 brew install openjdk@21
@@ -69,19 +80,21 @@ To wire OrigonSDK into your own app, start with these files:
 
 ## SDK dependency
 
-This source-validation example consumes the SDK artifact staged in Maven Local:
+The checked-in default consumes the released SDK. `origonSdkVersion` is the
+single switch used by the local-artifact gate:
 
 ```kotlin
 // settings.gradle.kts → dependencyResolutionManagement.repositories
 mavenLocal()
 
 // app/build.gradle.kts
-implementation("ai.origon:sdk:0.0.0-LOCAL")
+val origonSdkVersion = providers.gradleProperty("origonSdkVersion").getOrElse("0.3.0")
+implementation("ai.origon:sdk:$origonSdkVersion")
 ```
 
-Run `./gradlew :sdk:publishToMavenLocal` from the android-sdk root before
-building the example. For a published consumer, remove `mavenLocal()` and use
-the current released `ai.origon:sdk:<version>` coordinate from Maven Central.
+Never validate a local SDK under the released coordinate: Maven Central could
+satisfy it silently. Publish and select `0.3.0-LOCAL-PARITY`, then inspect
+`dependencyInsight` as shown above.
 
 Two extra notes for SDK consumers (both are worked around in this example):
 
@@ -112,8 +125,8 @@ keys directly, or retain those visible-copy fields in tap-time navigation extras
 ## Scope notes
 
 The example authenticates **by endpoint only** — it never signs a person in,
-so there is no login, profile, or account screen. It carries no test target;
-the shipped Origon apps hold the regression coverage.
+so there is no login, profile, or account screen. JVM tests own its pure copied
+policy; instrumentation tests own Android storage/service integration.
 
 Interactive chat prompts (`Message.buttons` / `Message.gallery`) render as
 option pills and a card carousel — see `ui/components/MessageButtons.kt` and
