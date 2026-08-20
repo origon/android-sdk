@@ -66,7 +66,15 @@ class AudioFocus(
             manager.requestAudioFocus(built)
         } else {
             @Suppress("DEPRECATION")
-            manager.requestAudioFocus(listener, AudioManager.STREAM_MUSIC, gain)
+            manager.requestAudioFocus(
+                listener,
+                if (usage == AudioAttributes.USAGE_VOICE_COMMUNICATION) {
+                    AudioManager.STREAM_VOICE_CALL
+                } else {
+                    AudioManager.STREAM_MUSIC
+                },
+                gain,
+            )
         }
         val granted = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         if (!granted) Log.w(TAG, "audio focus not granted: $result")
@@ -85,6 +93,14 @@ class AudioFocus(
 
     companion object {
         private const val TAG = "AudioFocus"
+
+        /** Focus for a live call; request only after foreground promotion. */
+        fun forCall(context: Context) = AudioFocus(
+            context = context,
+            usage = AudioAttributes.USAGE_VOICE_COMMUNICATION,
+            contentType = AudioAttributes.CONTENT_TYPE_SPEECH,
+            gain = AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE,
+        )
 
         /**
          * Focus for attachment playback. Yields to a call rather than talking

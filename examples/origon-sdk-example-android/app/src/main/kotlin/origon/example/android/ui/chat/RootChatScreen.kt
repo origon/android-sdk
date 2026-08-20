@@ -59,6 +59,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -108,6 +109,9 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import origon.example.android.R
 import origon.example.android.data.PendingAttachment
 import origon.example.android.services.ChatService
+import origon.example.android.services.CallForegroundService
+import origon.example.android.services.CallHostGateResult
+import origon.example.android.services.CallService
 import origon.example.android.services.ExampleEndpointPolicy
 import origon.example.android.services.EXAMPLE_NEW_MESSAGES_ACCESSIBILITY_LABEL
 import origon.example.android.services.exampleNewestEligibleMessageId
@@ -315,7 +319,16 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     var draft by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var revealedKey by remember { mutableStateOf<String?>(null) }
-    var callActive by remember { mutableStateOf(false) }
+    var callActive by rememberSaveable { mutableStateOf(false) }
+
+    // Activity state can outlive the process-scoped SDK manager. Never turn a
+    // restored overlay flag into a new microphone call after process death.
+    LaunchedEffect(Unit) {
+        val phase = sdk.call.phase.value
+        if (callActive && (phase is CallService.Phase.Idle || phase is CallService.Phase.Ended)) {
+            callActive = false
+        }
+    }
     var preview by remember { mutableStateOf<PreviewRequest?>(null) }
     var explicitSendSequence by remember { mutableIntStateOf(0) }
     var checkpointLoaded by remember { mutableStateOf(false) }
@@ -435,19 +448,34 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     //     when a Bluetooth headset is actually connected — otherwise every user
     //     sees the "Nearby devices" dialog for nothing.
     val micRequired = stringResource(R.string.call_mic_required)
+    val hostFailed = stringResource(R.string.call_host_failed)
+    val launchProtectedCall: () -> Unit = {
+        scope.launch {
+            when (CallForegroundService.start(context)) {
+                CallHostGateResult.Ready -> callActive = true
+                is CallHostGateResult.Failed -> toast.show(hostFailed)
+            }
+        }
+    }
     val requestCallPermissions = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { _ ->
         // Gate only on the mic — re-check the live grant, since it may have been
         // granted earlier and not be part of this request. A denied (or absent)
         // BLUETOOTH_CONNECT is fine: the call proceeds on the built-in device.
-        if (context.micGranted()) callActive = true else toast.show(micRequired)
+        if (context.micGranted()) launchProtectedCall() else toast.show(micRequired)
     }
 
     val startCall = {
         keyboard?.hide()
         val needed = buildList {
             if (!context.micGranted()) add(Manifest.permission.RECORD_AUDIO)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                context.checkSelfPermissionCompat(Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
                 context.bluetoothHeadsetConnected() &&
                 context.checkSelfPermissionCompat(Manifest.permission.BLUETOOTH_CONNECT) !=
@@ -456,7 +484,8 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                 add(Manifest.permission.BLUETOOTH_CONNECT)
             }
         }
-        if (needed.isEmpty()) callActive = true else requestCallPermissions.launch(needed.toTypedArray())
+        if (needed.isEmpty()) launchProtectedCall() else requestCallPermissions.launch(needed.toTypedArray())
+        Unit
     }
 
     val hasContent = draft.isNotBlank() || pending.isNotEmpty()
