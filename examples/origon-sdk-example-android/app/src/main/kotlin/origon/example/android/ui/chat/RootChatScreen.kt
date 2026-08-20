@@ -112,6 +112,7 @@ import origon.example.android.services.ChatService
 import origon.example.android.services.CallForegroundService
 import origon.example.android.services.CallHostGateResult
 import origon.example.android.services.CallService
+import origon.example.android.services.callPermissionAllowsHost
 import origon.example.android.services.ExampleEndpointPolicy
 import origon.example.android.services.EXAMPLE_NEW_MESSAGES_ACCESSIBILITY_LABEL
 import origon.example.android.services.exampleNewestEligibleMessageId
@@ -459,11 +460,15 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     }
     val requestCallPermissions = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { _ ->
+    ) { result ->
         // Gate only on the mic — re-check the live grant, since it may have been
         // granted earlier and not be part of this request. A denied (or absent)
         // BLUETOOTH_CONNECT is fine: the call proceeds on the built-in device.
-        if (context.micGranted()) launchProtectedCall() else toast.show(micRequired)
+        if (callPermissionAllowsHost(result, context.micGranted())) {
+            launchProtectedCall()
+        } else {
+            toast.show(micRequired)
+        }
     }
 
     val startCall = {

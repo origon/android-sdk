@@ -85,10 +85,10 @@ class CallForegroundService : Service() {
         val call = (application as OrigonExampleApp).sdk.call
         scope.launch {
             val began = withTimeoutOrNull(START_GRACE_MS) {
-                call.phase.first { it !is CallService.Phase.Idle && it !is CallService.Phase.Ended }
+                call.phase.first(::callHostBegan)
             }
             if (began != null) {
-                call.phase.first { it is CallService.Phase.Idle || it is CallService.Phase.Ended }
+                call.phase.first(::callHostTerminal)
             }
             stopSelf()
         }
@@ -218,3 +218,9 @@ internal fun callHostCommand(action: String?): CallHostCommand = when (action) {
     null -> CallHostCommand.Orphan
     else -> CallHostCommand.Orphan
 }
+
+internal fun callHostBegan(phase: CallService.Phase): Boolean =
+    phase !is CallService.Phase.Idle && phase !is CallService.Phase.Ended
+
+internal fun callHostTerminal(phase: CallService.Phase): Boolean =
+    phase is CallService.Phase.Idle || phase is CallService.Phase.Ended

@@ -1,5 +1,6 @@
 package origon.example.android.services
 
+import android.Manifest
 import kotlinx.coroutines.withTimeoutOrNull
 
 internal interface PromotedCallHost {
@@ -11,6 +12,11 @@ internal sealed interface CallHostGateResult {
     data object Ready : CallHostGateResult
     data class Failed(val reason: String) : CallHostGateResult
 }
+
+internal fun callPermissionAllowsHost(
+    result: Map<String, Boolean>,
+    microphoneCurrentlyGranted: Boolean,
+): Boolean = result[Manifest.permission.RECORD_AUDIO] ?: microphoneCurrentlyGranted
 
 /** Testable five-second gate shared by the Android service binding and unit tests. */
 internal suspend fun awaitPromotedCallHost(

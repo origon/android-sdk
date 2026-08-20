@@ -252,8 +252,8 @@ From a visible Activity, request `RECORD_AUDIO`, call
 `startForeground` with a neutral ongoing call notification and hang-up action.
 Bind and wait for acknowledgement **after** promotion (use a bounded timeout,
 five seconds in the example), then acquire voice-call audio focus, and only then
-call `client.startCall`. On permission, start, promotion, binding, focus, or
-timeout failure, stop/unbind the service and do not enter the SDK. Android 13+
+call `client.startCall`. On permission, start, promotion, binding, focus-setup
+exception, or timeout failure, stop/unbind the service and do not enter the SDK. Android 13+
 `POST_NOTIFICATIONS` denial does not by itself prevent a successfully promoted
 foreground service; the task remains visible in Task Manager.
 

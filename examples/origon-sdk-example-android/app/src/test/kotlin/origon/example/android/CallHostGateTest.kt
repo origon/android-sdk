@@ -1,5 +1,6 @@
 package origon.example.android
 
+import android.Manifest
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import origon.example.android.services.CallForegroundService
@@ -8,6 +9,10 @@ import origon.example.android.services.CallHostGateResult
 import origon.example.android.services.PromotedCallHost
 import origon.example.android.services.awaitPromotedCallHost
 import origon.example.android.services.callHostCommand
+import origon.example.android.services.callHostBegan
+import origon.example.android.services.callHostTerminal
+import origon.example.android.services.callPermissionAllowsHost
+import origon.example.android.services.CallService
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -94,5 +99,32 @@ class CallHostGateTest {
         assertEquals(CallHostCommand.Orphan, callHostCommand(null))
         assertEquals(CallHostCommand.Start, callHostCommand(CallForegroundService.ACTION_START))
         assertEquals(CallHostCommand.Orphan, callHostCommand("unexpected"))
+    }
+
+    @Test
+    fun `notification and Bluetooth denial do not override microphone authority`() {
+        val grants = mapOf(
+            Manifest.permission.RECORD_AUDIO to true,
+            Manifest.permission.POST_NOTIFICATIONS to false,
+            Manifest.permission.BLUETOOTH_CONNECT to false,
+        )
+        assertEquals(true, callPermissionAllowsHost(grants, microphoneCurrentlyGranted = false))
+        assertEquals(
+            false,
+            callPermissionAllowsHost(
+                mapOf(Manifest.permission.RECORD_AUDIO to false),
+                microphoneCurrentlyGranted = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `remote local and teardown phases all stop one begun host`() {
+        assertEquals(true, callHostBegan(CallService.Phase.Connecting))
+        assertEquals(true, callHostBegan(CallService.Phase.Connected))
+        assertEquals(true, callHostBegan(CallService.Phase.Reconnecting))
+        assertEquals(true, callHostTerminal(CallService.Phase.Ended("remote disconnect")))
+        assertEquals(true, callHostTerminal(CallService.Phase.Ended(null)))
+        assertEquals(true, callHostTerminal(CallService.Phase.Idle))
     }
 }
