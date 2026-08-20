@@ -54,6 +54,7 @@ class ChatService internal constructor(
     private val sdkClient: () -> OrigonClient?,
     private val destinationClient: () -> ChatSessionClient?,
     private val refreshSessions: suspend () -> Unit,
+    private val endpointPolicy: () -> ExampleEndpointPolicy = { ExampleEndpointPolicy.DISABLED },
 ) {
 
     constructor(manager: SDKManager) : this(
@@ -62,6 +63,7 @@ class ChatService internal constructor(
         sdkClient = { manager.client },
         destinationClient = { manager.chatClient },
         refreshSessions = { manager.refreshSessions() },
+        endpointPolicy = { manager.endpointPolicy },
     )
 
     enum class DestinationLoadState {
@@ -354,6 +356,7 @@ class ChatService internal constructor(
         /** The card title a gallery pick came from. Null otherwise. */
         galleryLabel: String? = null,
     ) {
+        if (!endpointPolicy().chatEnabled) return
         val trimmed = text.trim()
         try {
             // Read tiles through the projection: with no session focused they
@@ -527,6 +530,10 @@ class ChatService internal constructor(
      * upload — an attachment can be the first thing a visitor sends.
      */
     fun uploadFile(uri: Uri, fileName: String, contentType: String) {
+        if (!endpointPolicy().allowsAttachment(contentType)) {
+            _error.tryEmit("This attachment type is disabled for this endpoint")
+            return
+        }
         val localId = UUID.randomUUID().toString()
         val pending = PendingAttachment(
             id = localId,

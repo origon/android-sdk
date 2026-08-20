@@ -47,6 +47,12 @@ class SDKManager(private val appContext: Context) {
     private val _sessions = MutableStateFlow<List<SessionSummary>>(emptyList())
     val sessions: StateFlow<List<SessionSummary>> = _sessions.asStateFlow()
 
+    private val configReplacement = ExampleConfigReplacement()
+    private val _serverConfig = MutableStateFlow<ExampleServerConfig?>(null)
+    val serverConfig: StateFlow<ExampleServerConfig?> = _serverConfig.asStateFlow()
+    val endpointPolicy: ExampleEndpointPolicy
+        get() = ExampleEndpointPolicy.from(_serverConfig.value)
+
     /** Broadcast of every event drained from [OrigonClient.pollEvent]. */
     private val _events = MutableSharedFlow<ClientEvent>(extraBufferCapacity = 256)
     val events: SharedFlow<ClientEvent> = _events.asSharedFlow()
@@ -68,6 +74,8 @@ class SDKManager(private val appContext: Context) {
 
     /** Connect to the Origon backend and start the event poll loop. */
     suspend fun initialize(endpoint: String, userId: String? = null, token: String? = null) {
+        val configToken = configReplacement.begin()
+        _serverConfig.value = null
         chat.clientWillChange()
         val config = ClientConfig(
             endpoint = endpoint,
@@ -77,7 +85,13 @@ class SDKManager(private val appContext: Context) {
         // OrigonClient(...) blocks on the FFI runtime during the /config
         // round trip — keep it off the main thread.
         val newClient = withContext(Dispatchers.IO) { OrigonClient(appContext, config) }
+        val cachedConfig = ExampleServerConfig.from(newClient.serverConfig)
+        if (!configReplacement.install(cachedConfig, configToken)) {
+            newClient.close()
+            return
+        }
         client = newClient
+        _serverConfig.value = cachedConfig
         chat.clientDidChange()
         _isReady.value = true
         startPolling()
@@ -85,6 +99,8 @@ class SDKManager(private val appContext: Context) {
 
     /** Destroy the client, reset child services, and stop polling. */
     fun teardown() {
+        configReplacement.begin()
+        _serverConfig.value = null
         stopPolling()
         chat.destroy()
         _sessions.value = emptyList()

@@ -30,6 +30,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
 import origon.example.android.services.ChatService
 import origon.example.android.services.ChatSessionClient
+import origon.example.android.services.ExampleAttachmentPolicy
+import origon.example.android.services.ExampleEndpointPolicy
 import origon.example.android.data.PendingAttachment
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -318,7 +320,13 @@ class ChatDestinationPolicyTest {
         private val job = SupervisorJob(parent.coroutineContext[Job])
         val scope = CoroutineScope(parent.coroutineContext + job)
         val fake = FakeChatSessionClient()
-        val service = ChatService(scope, emptyFlow(), { null }, { fake }, {})
+        val service = ChatService(scope, emptyFlow(), { null }, { fake }, {}, {
+            ExampleEndpointPolicy(
+                greeting = "Welcome", chatEnabled = true, callEnabled = true,
+                multipleChannels = true,
+                attachments = ExampleAttachmentPolicy(true, true, true, true),
+            )
+        })
 
         suspend fun await(predicate: () -> Boolean) {
             repeat(500) { if (predicate()) return; yield() }

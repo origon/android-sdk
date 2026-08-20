@@ -95,6 +95,7 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import origon.example.android.R
 import origon.example.android.data.PendingAttachment
 import origon.example.android.services.ChatService
+import origon.example.android.services.ExampleEndpointPolicy
 import origon.example.android.services.SDKManager
 import origon.example.android.ui.call.CallView
 import origon.example.android.ui.components.AttachmentsPreview
@@ -272,6 +273,8 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     val currentSessionId by chat.currentSessionId.collectAsState()
     val connectionState by chat.connectionState.collectAsState()
     val canSend by chat.canSend.collectAsState()
+    val serverConfig by sdk.serverConfig.collectAsState()
+    val endpointPolicy = ExampleEndpointPolicy.from(serverConfig)
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -477,7 +480,7 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                 } else {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         if (messages.isEmpty() && !isTyping) {
-                            EmptyTranscript()
+                            EmptyTranscript(endpointPolicy.greeting)
                         } else {
                             Transcript(
                                 messages = messages,
@@ -490,7 +493,7 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                                     preview = PreviewRequest(message.attachments, index)
                                 },
                                 onDownloadAttachment = downloader::download,
-                                promptIsLive = chat::promptIsLive,
+                                promptIsLive = { endpointPolicy.promptSendEnabled && chat.promptIsLive(it) },
                                 promptSelection = chat::selectionFor,
                                 onPromptReply = { promptId, cardIndex, label, value, galleryLabel ->
                                     scope.launch {
@@ -512,7 +515,19 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                         connection = connectionState,
                         canSend = canSend,
                     )
-                    Composer(
+                    if (endpointPolicy.showsVoiceOnlyAction) {
+                        PrimaryButton(
+                            title = "Start a call",
+                            onClick = startCall,
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        )
+                    } else if (!endpointPolicy.showsComposer) {
+                        Text(
+                            text = "Messaging and calls are unavailable for this endpoint.",
+                            color = OrigonTheme.colors.textSecondary,
+                            modifier = Modifier.fillMaxWidth().padding(20.dp),
+                        )
+                    } else Composer(
                         draft = draft,
                         onDraftChange = { value ->
                             draft = value
@@ -527,15 +542,27 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                             when (kind) {
                                 AttachKind.MEDIA -> pickMedia.launch(
                                     PickVisualMediaRequest(
-                                        ActivityResultContracts.PickVisualMedia.ImageAndVideo,
+                                        when {
+                                            endpointPolicy.attachments.images && endpointPolicy.attachments.videos ->
+                                                ActivityResultContracts.PickVisualMedia.ImageAndVideo
+                                            endpointPolicy.attachments.images ->
+                                                ActivityResultContracts.PickVisualMedia.ImageOnly
+                                            else -> ActivityResultContracts.PickVisualMedia.VideoOnly
+                                        },
                                     ),
                                 )
-                                AttachKind.FILE -> pickFile.launch(arrayOf("*/*"))
+                                AttachKind.FILE -> pickFile.launch(
+                                    if (endpointPolicy.attachments.documents) arrayOf("*/*")
+                                    else arrayOf("audio/*"),
+                                )
                             }
                         },
                         onSend = send,
                         onStartCall = startCall,
                         enabled = currentSessionId == null || canSend,
+                        allowMedia = endpointPolicy.attachments.images || endpointPolicy.attachments.videos,
+                        allowFiles = endpointPolicy.attachments.documents || endpointPolicy.attachments.audio,
+                        voiceActionEnabled = endpointPolicy.showsComposerVoiceAction,
                     )
                 }
             }
@@ -700,7 +727,7 @@ private fun ConnectionStatus(
 }
 
 @Composable
-private fun EmptyTranscript() {
+private fun EmptyTranscript(greeting: String) {
     Column(
         Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,
@@ -712,7 +739,7 @@ private fun EmptyTranscript() {
             modifier = Modifier.size(56.dp).padding(bottom = 24.dp),
         )
         Text(
-            text = stringResource(R.string.chat_empty_greeting),
+            text = greeting,
             style = MaterialTheme.typography.headlineSmall,
             color = OrigonTheme.colors.textPrimary,
         )
@@ -804,6 +831,9 @@ private fun Composer(
     onSend: () -> Unit,
     onStartCall: () -> Unit,
     enabled: Boolean,
+    allowMedia: Boolean,
+    allowFiles: Boolean,
+    voiceActionEnabled: Boolean,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val attachInteraction = remember { MutableInteractionSource() }
@@ -833,7 +863,7 @@ private fun Composer(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Box {
+            if (allowMedia || allowFiles) Box {
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
@@ -854,14 +884,14 @@ private fun Composer(
                     )
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(
+                    if (allowMedia) DropdownMenuItem(
                         text = { Text(stringResource(R.string.attach_photo_library)) },
                         onClick = {
                             menuOpen = false
                             onAttach(AttachKind.MEDIA)
                         },
                     )
-                    DropdownMenuItem(
+                    if (allowFiles) DropdownMenuItem(
                         text = { Text(stringResource(R.string.attach_files)) },
                         onClick = {
                             menuOpen = false
@@ -902,7 +932,7 @@ private fun Composer(
                     .clickable(
                         interactionSource = sendInteraction,
                         indication = null,
-                        enabled = enabled && !sending,
+                        enabled = enabled && !sending && (hasContent || voiceActionEnabled),
                         onClickLabel = if (hasContent) "Send" else "Start a call",
                         onClick = { if (hasContent) onSend() else onStartCall() },
                     ),
@@ -912,7 +942,7 @@ private fun Composer(
                 } else {
                     Icon(
                         painterResource(
-                            if (hasContent) R.drawable.ic_send else R.drawable.ic_voice,
+                            if (hasContent || !voiceActionEnabled) R.drawable.ic_send else R.drawable.ic_voice,
                         ),
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onPrimary,
