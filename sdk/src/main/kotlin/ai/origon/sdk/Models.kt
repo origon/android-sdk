@@ -389,12 +389,48 @@ data class Message(
     val errorText: String? = null,
     val status: MessageStatus = MessageStatus.DELIVERED,
     val state: MessageState = MessageState.COMPLETED,
+    /** Required when serialization decodes a server or cached row. */
+    val metadata: MessageMetadata,
+) {
     /**
-     * Server-stamped delivery classification. Kept last so existing positional
-     * constructors remain source-compatible and default to `ALL`.
+     * Source-compatible constructor for locally created values. Serialization
+     * uses the primary constructor above, so decoded metadata cannot be omitted.
      */
-    val metadata: MessageMetadata = MessageMetadata(),
-)
+    constructor(
+        role: MessageRole = MessageRole.EXTERNAL,
+        id: String = "",
+        localId: String? = null,
+        text: String? = null,
+        html: String? = null,
+        timestamp: String? = null,
+        userId: String? = null,
+        userName: String? = null,
+        action: String? = null,
+        attachments: List<Attachment> = emptyList(),
+        buttons: List<MessageButton> = emptyList(),
+        gallery: List<MessageCard> = emptyList(),
+        errorText: String? = null,
+        status: MessageStatus = MessageStatus.DELIVERED,
+        state: MessageState = MessageState.COMPLETED,
+    ) : this(
+        role = role,
+        id = id,
+        localId = localId,
+        text = text,
+        html = html,
+        timestamp = timestamp,
+        userId = userId,
+        userName = userName,
+        action = action,
+        attachments = attachments,
+        buttons = buttons,
+        gallery = gallery,
+        errorText = errorText,
+        status = status,
+        state = state,
+        metadata = MessageMetadata(),
+    )
+}
 
 /** Payload for [OrigonClient.sendMessage]. Mirrors the Rust `SendMessagePayload` shape. */
 @Serializable
