@@ -71,6 +71,7 @@ To wire OrigonSDK into your own app, start with these files:
 | `services/SDKManager.kt` | Single entry point. Owns `OrigonClient`, drains the SDK event queue on a 50 ms loop into a `SharedFlow`, exposes `CallService` / `ChatService`. |
 | `services/ChatService.kt` | Chat state — `openSession`, `sendMessage`, attachment upload, typing, multi-session bookkeeping, all as `StateFlow`s. |
 | `services/CallService.kt` | Voice-call state machine — `startCall`, `setMute`, `endCall`, phase transitions. |
+| `services/CallForegroundService.kt`, `CallHostGate.kt` | Private microphone FGS, post-promotion five-second acknowledgement, audio focus, notification hang-up, and idempotent cleanup. |
 | `ui/endpoint/EndpointScreen.kt` | Calls `sdk.initialize(endpoint)`. |
 | `ui/chat/RootChatScreen.kt` | Boots the SDK, hosts the drawer, transcript, composer, and the call + attachment overlays. |
 | `ui/chat/Sidebar.kt` | Past sessions, grouped by day. |
@@ -119,14 +120,43 @@ Only an exact endpoint-generation match exposes `payload.title` and
 back from a null title to your app name. Do not read the raw `title` or `preview`
 keys directly, or retain those visible-copy fields in tap-time navigation extras.
 
+## Cache and named chat access
+
+The example paints finite cache-first directory/transcript Flows and reconciles
+the one authoritative result without losing live/provisional rows. Selecting a
+history row calls `openChat(sessionId, EXPLICIT_NAVIGATION)` before sending, so
+cached display never acquires takeover authority. Its protected `NEW MESSAGES`
+checkpoint lives under `noBackupFilesDir` and remains app-owned.
+
+This sample deliberately does **not** call `restoreActiveChats()` and does not
+auto-return to a recent chat. Those are host-product lifecycle choices. Apps
+that want passive retained-chat restore can follow the main README while
+keeping explicit row and notification navigation on their named intents.
+
 ## Permissions
 
 - **Microphone** (`RECORD_AUDIO`) — voice calls. Requested at call time; the
   SDK only *declares* it, since it has no Activity to drive the dialog.
 - **Nearby devices** (`BLUETOOTH_CONNECT`, API 31+) — requested only when a
   Bluetooth headset is actually connected, so most users never see the prompt.
+- **Notifications** (`POST_NOTIFICATIONS`, API 33+) — requested with the call
+  permissions but does not gate a successfully promoted microphone service.
+- **Foreground service** — `FOREGROUND_SERVICE` and
+  `FOREGROUND_SERVICE_MICROPHONE`; the private call host promotes before audio
+  focus or native capture, then survives background/screen-off.
 - **Camera** (`CAMERA`) — declared for completeness
 - **Media/storage reads** — attachment picking
+
+Every call begins from the visible call action after microphone permission.
+Promotion/binding is acknowledged within five seconds before audio focus and
+`CallService.startCall`; every refusal/timeout stops the host with no SDK call.
+Remote/local end, notification hang-up, repeated start, SDK failure, and process
+recreation converge on the same idempotent cleanup.
+
+The example intentionally contains no `FirebaseMessagingService` or other push
+runtime. Use the main README for complete data-only FCM setup, token/generation
+authority, generic fallback, tap revalidation, logout/unregister, force-stopped
+and uninstall behavior, and secret-safe logging.
 
 ## Scope notes
 
