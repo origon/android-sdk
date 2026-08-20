@@ -5,6 +5,7 @@ import java.nio.file.Files
 import kotlin.io.path.readText
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
 import org.commonmark.parser.Parser
 import org.jsoup.Jsoup
 import org.junit.Test
@@ -15,7 +16,12 @@ class ParserDependencyInstrumentedTest {
     @Test
     fun parsersAndDesugaredNioRunOnTheDevice() {
         assertEquals("device", Jsoup.parseBodyFragment("<i>device</i>").text())
-        assertNotNull(Parser.builder().build().parse("~~device~~"))
+        assertNotNull(
+            Parser.builder()
+                .extensions(listOf(StrikethroughExtension.create()))
+                .build()
+                .parse("~~device~~"),
+        )
 
         val path = Files.createTempFile("origon-example-parser", ".txt")
         try {

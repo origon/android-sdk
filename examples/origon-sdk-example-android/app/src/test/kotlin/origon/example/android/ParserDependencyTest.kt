@@ -5,6 +5,7 @@ import kotlin.io.path.readText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
 import org.commonmark.parser.Parser
 import org.jsoup.Jsoup
 
@@ -12,7 +13,12 @@ class ParserDependencyTest {
     @Test
     fun exactParserSurfaceAndNioAreExecutable() {
         assertEquals("safe", Jsoup.parseBodyFragment("<b>safe</b>").text())
-        assertNotNull(Parser.builder().build().parse("~~safe~~"))
+        assertNotNull(
+            Parser.builder()
+                .extensions(listOf(StrikethroughExtension.create()))
+                .build()
+                .parse("~~safe~~"),
+        )
 
         val path = Files.createTempFile("origon-example-parser", ".txt")
         try {
