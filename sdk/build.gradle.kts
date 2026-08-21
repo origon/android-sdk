@@ -123,7 +123,7 @@ if (exactAarPath.isPresent) {
         "exactAarSha256 must be one lowercase SHA-256"
     }
 
-    afterEvaluate {
+    gradle.projectsEvaluated {
         val publications = extensions
             .getByType(PublishingExtension::class.java)
             .publications
