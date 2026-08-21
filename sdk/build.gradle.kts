@@ -124,7 +124,7 @@ if (exactAarPath.isPresent) {
     }
 
     gradle.projectsEvaluated {
-        val publications = extensions
+        val publications = project.extensions
             .getByType(PublishingExtension::class.java)
             .publications
             .withType(MavenPublication::class.java)
@@ -140,7 +140,7 @@ if (exactAarPath.isPresent) {
             }
         }
 
-        val verifyExactAarPublication = tasks.register("verifyExactAarPublication") {
+        val verifyExactAarPublication = project.tasks.register("verifyExactAarPublication") {
             group = "publishing"
             description = "Verifies the exact prebuilt AAR and no-rebuild publication wiring."
             inputs.file(exactAar)
@@ -186,7 +186,7 @@ if (exactAarPath.isPresent) {
             }
         }
 
-        tasks.matching { task ->
+        project.tasks.matching { task ->
             task.name.contains("publish", ignoreCase = true) ||
                 task.name.contains("MavenCentral", ignoreCase = true)
         }.configureEach {
