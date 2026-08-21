@@ -128,7 +128,6 @@ if (exactAarPath.isPresent) {
             .getByType(PublishingExtension::class.java)
             .publications
             .withType(MavenPublication::class.java)
-        require(publications.isNotEmpty()) { "no Maven publication was configured" }
         publications.configureEach {
             require(groupId == "ai.origon" && artifactId == "sdk") {
                 "exact AAR mode refuses unexpected coordinates: $groupId:$artifactId:$version"
@@ -146,6 +145,7 @@ if (exactAarPath.isPresent) {
             description = "Verifies the exact prebuilt AAR and no-rebuild publication wiring."
             inputs.file(exactAar)
             doLast {
+                check(publications.isNotEmpty()) { "no Maven publication was configured" }
                 val digest = MessageDigest.getInstance("SHA-256")
                 exactAar.inputStream().use { input ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
