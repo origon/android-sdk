@@ -145,7 +145,7 @@ if (exactAarPath.isPresent) {
             group = "publishing"
             description = "Verifies the exact prebuilt AAR and no-rebuild publication wiring."
             inputs.file(exactAar)
-            doLast { verificationTask ->
+            doLast {
                 val digest = MessageDigest.getInstance("SHA-256")
                 exactAar.inputStream().use { input ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
@@ -173,7 +173,7 @@ if (exactAarPath.isPresent) {
                     }
                     check(
                         mainAars.single().buildDependencies
-                            .getDependencies(verificationTask)
+                            .getDependencies(this)
                             .isEmpty()
                     ) {
                         "exact AAR unexpectedly has build dependencies"
