@@ -30,19 +30,8 @@ sync, pick a device, and Run.
 ### Command line (no Android Studio)
 
 The example defaults to released SDK `0.3.0`. To validate a sibling SDK build,
-publish it under a unique local version and select the same version explicitly:
-
-```bash
-cd android-sdk
-./gradlew :sdk:publishToMavenLocal -PsdkVersion=0.3.0-LOCAL-PARITY
-cd examples/origon-sdk-example-android
-./gradlew :app:dependencyInsight \
-  --dependency ai.origon:sdk \
-  --configuration debugRuntimeClasspath \
-  -PorigonSdkVersion=0.3.0-LOCAL-PARITY
-./gradlew :app:testDebugUnitTest :app:connectedDebugAndroidTest \
-  -PorigonSdkVersion=0.3.0-LOCAL-PARITY
-```
+install the required toolchain, publish it under a unique local version, and
+select the same version explicitly:
 
 ```bash
 brew install openjdk@21
@@ -50,8 +39,17 @@ brew install --cask android-commandlinetools
 sdkmanager "platform-tools" "build-tools;37.0.0" "platforms;android-37" \
   "ndk;27.2.12479018"
 
-cd android-sdk/examples/origon-sdk-example-android
-./run.sh
+cd android-sdk
+./gradlew :sdk:publishToMavenLocal -PsdkVersion=0.4.0-LOCAL-LCM
+cd examples/origon-sdk-example-android
+./gradlew :app:dependencyInsight \
+  --dependency ai.origon:sdk \
+  --configuration debugRuntimeClasspath \
+  -PorigonSdkVersion=0.4.0-LOCAL-LCM
+./gradlew :app:testDebugUnitTest :app:assembleDebug :app:lint \
+  -PorigonSdkVersion=0.4.0-LOCAL-LCM
+# With an emulator or device connected:
+./gradlew :app:connectedDebugAndroidTest -PorigonSdkVersion=0.4.0-LOCAL-LCM
 ```
 
 `run.sh` auto-detects `ANDROID_HOME` and pins a compatible JDK, builds the
@@ -89,12 +87,14 @@ single switch used by the local-artifact gate:
 mavenLocal()
 
 // app/build.gradle.kts
-val origonSdkVersion = providers.gradleProperty("origonSdkVersion").getOrElse("0.3.0")
+val origonSdkVersion = providers.gradleProperty("origonSdkVersion")
+    .getOrElse("0.3.0")
+    .trim()
 implementation("ai.origon:sdk:$origonSdkVersion")
 ```
 
 Never validate a local SDK under the released coordinate: Maven Central could
-satisfy it silently. Publish and select `0.3.0-LOCAL-PARITY`, then inspect
+satisfy it silently. Publish and select a unique local version, then inspect
 `dependencyInsight` as shown above.
 
 Two extra notes for SDK consumers (both are worked around in this example):

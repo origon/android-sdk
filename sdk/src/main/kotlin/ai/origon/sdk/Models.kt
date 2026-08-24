@@ -70,6 +70,22 @@ enum class MessageState {
     @SerialName("completed") COMPLETED,
 }
 
+/** Delivery audience stamped by the chat server on every transcript row. */
+@Serializable
+enum class MessageAudience {
+    /** Visible only to attached internal agents and supervisors. */
+    @SerialName("internal") INTERNAL,
+    /** Visible to internal participants and the external visitor. */
+    @SerialName("all") ALL,
+}
+
+/** Typed server metadata carried by every [Message]. */
+@Serializable
+data class MessageMetadata(
+    /** Defaults to [MessageAudience.ALL] for source-compatible local messages. */
+    val audience: MessageAudience = MessageAudience.ALL,
+)
+
 /**
  * Audio output route override for a voice call — the "speakerphone" concept,
  * distinct from device selection. Android applies it via `AudioManager`
@@ -373,7 +389,48 @@ data class Message(
     val errorText: String? = null,
     val status: MessageStatus = MessageStatus.DELIVERED,
     val state: MessageState = MessageState.COMPLETED,
-)
+    /** Required when serialization decodes a server or cached row. */
+    val metadata: MessageMetadata,
+) {
+    /**
+     * Source-compatible constructor for locally created values. Serialization
+     * uses the primary constructor above, so decoded metadata cannot be omitted.
+     */
+    constructor(
+        role: MessageRole = MessageRole.EXTERNAL,
+        id: String = "",
+        localId: String? = null,
+        text: String? = null,
+        html: String? = null,
+        timestamp: String? = null,
+        userId: String? = null,
+        userName: String? = null,
+        action: String? = null,
+        attachments: List<Attachment> = emptyList(),
+        buttons: List<MessageButton> = emptyList(),
+        gallery: List<MessageCard> = emptyList(),
+        errorText: String? = null,
+        status: MessageStatus = MessageStatus.DELIVERED,
+        state: MessageState = MessageState.COMPLETED,
+    ) : this(
+        role = role,
+        id = id,
+        localId = localId,
+        text = text,
+        html = html,
+        timestamp = timestamp,
+        userId = userId,
+        userName = userName,
+        action = action,
+        attachments = attachments,
+        buttons = buttons,
+        gallery = gallery,
+        errorText = errorText,
+        status = status,
+        state = state,
+        metadata = MessageMetadata(),
+    )
+}
 
 /** Payload for [OrigonClient.sendMessage]. Mirrors the Rust `SendMessagePayload` shape. */
 @Serializable
