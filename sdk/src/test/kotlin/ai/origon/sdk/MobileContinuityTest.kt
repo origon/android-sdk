@@ -7,7 +7,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 
 class MobileContinuityTest {
     private val json = Json { ignoreUnknownKeys = true }
@@ -32,20 +34,57 @@ class MobileContinuityTest {
     }
 
     @Test
-    fun messageRequiresDecodedAudienceMetadataButLocalConstructionDefaultsToAll() {
+    fun messageAndSendPayloadPreserveOptionalAudienceMetadata() {
         val internalRow = """{"id":"m1","metadata":{"audience":"internal"}}"""
         assertEquals(
             MessageAudience.INTERNAL,
-            json.decodeFromString<Message>(internalRow).metadata.audience,
+            json.decodeFromString<Message>(internalRow).metadata?.audience,
+        )
+        assertEquals(
+            MessageAudience.ALL,
+            json.decodeFromString<Message>("""{"id":"m1a","metadata":{"audience":"all"}}""")
+                .metadata?.audience,
         )
 
-        val missing = """{"id":"m2"}"""
-        assertFails { json.decodeFromString<Message>(missing) }
+        for (row in listOf("""{"id":"m2"}""", """{"id":"m2","metadata":null}""")) {
+            assertNull(json.decodeFromString<Message>(row).metadata)
+        }
 
-        assertEquals(MessageAudience.ALL, Message(id = "local").metadata.audience)
+        for (row in listOf(
+            """{"id":"m3","metadata":{}}""",
+            """{"id":"m3","metadata":{"audience":null}}""",
+            """{"id":"m3","metadata":{"audience":""}}""",
+        )) {
+            assertNull(json.decodeFromString<Message>(row).metadata?.audience)
+        }
 
-        val unknown = """{"id":"m3","metadata":{"audience":"staff"}}"""
+        assertNull(Message(id = "local").metadata)
+
+        val unknown = """{"id":"m4","metadata":{"audience":"staff"}}"""
         assertFails { json.decodeFromString<Message>(unknown) }
+        assertFails { json.decodeFromString<Message>("""{"id":"m5","metadata":{"audience":" "}}""") }
+
+        assertFalse(json.encodeToString(SendMessagePayload(text = "hello")).contains("metadata"))
+        assertEquals(
+            emptySet(),
+            json.parseToJsonElement(
+                json.encodeToString(SendMessagePayload(metadata = MessageMetadata())),
+            ).jsonObject.getValue("metadata").jsonObject.keys,
+        )
+        assertEquals(
+            "all",
+            json.parseToJsonElement(
+                json.encodeToString(
+                    SendMessagePayload(metadata = MessageMetadata(MessageAudience.ALL)),
+                ),
+            ).jsonObject.getValue("metadata").jsonObject.getValue("audience").toString().trim('"'),
+        )
+    }
+
+    @Test
+    fun sessionSummaryLastMessageAcceptsLegacyMissingMetadata() {
+        val row = """{"sessionId":"s","subject":"Support","channel":"chat","active":false,"createdAt":"c","updatedAt":"u","lastMessage":{"id":"m","role":"external","attachments":[],"status":"delivered","state":"completed"}}"""
+        assertNull(json.decodeFromString<SessionSummary>(row).lastMessage?.metadata)
     }
 
     @Test

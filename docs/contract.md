@@ -19,13 +19,12 @@ registers cross-repository contracts that must change and validate together.
 
 ## Live-chat audience metadata
 
-- The wrapper mirrors apps/sdk's typed `Message.metadata.audience` as
-  `MessageMetadata(audience: MessageAudience)`. The two accepted wire values
-  are `internal` and `all`; omission or an unknown value fails decoding for
-  server and cached JSON. A secondary public constructor remains
-  source-compatible for consumer-created local values by defaulting to `all`;
-  the serialization primary constructor and Rust SDK both require metadata on
-  every server row.
+- Version 0.3.1 mirrors apps/sdk's two-level optional boundary as nullable
+  `Message.metadata`, nullable `MessageMetadata.audience`, and nullable
+  `SendMessagePayload.metadata`. Missing/null/empty values remain null,
+  explicit lowercase `internal|all` values are preserved, and every other
+  non-empty value fails without trimming. Encoding omits null while preserving
+  an explicitly supplied empty metadata object as `{}`.
 - Canonical wire production and validation are registered in
   `/home/yl/workspace/platform/cx/CONTRACT.md` and
   `/home/yl/workspace/apps/sdk/CONTRACT.md`. This wrapper only decodes the

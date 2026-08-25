@@ -2,7 +2,18 @@ package ai.origon.sdk
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.descriptors.buildClassSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonEncoder
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 // ── Enums ────────────────────────────────────────────────────────────
 
@@ -70,7 +81,7 @@ enum class MessageState {
     @SerialName("completed") COMPLETED,
 }
 
-/** Delivery audience stamped by the chat server on every transcript row. */
+/** Closed delivery-audience vocabulary. The field holding it may be absent. */
 @Serializable
 enum class MessageAudience {
     /** Visible only to attached internal agents and supervisors. */
@@ -79,12 +90,50 @@ enum class MessageAudience {
     @SerialName("all") ALL,
 }
 
-/** Typed server metadata carried by every [Message]. */
-@Serializable
+/** Optional message metadata with strict lowercase wire values. */
+@Serializable(with = MessageMetadataSerializer::class)
 data class MessageMetadata(
-    /** Defaults to [MessageAudience.ALL] for source-compatible local messages. */
-    val audience: MessageAudience = MessageAudience.ALL,
+    val audience: MessageAudience? = null,
 )
+
+internal object MessageMetadataSerializer : KSerializer<MessageMetadata> {
+    override val descriptor = buildClassSerialDescriptor("ai.origon.sdk.MessageMetadata")
+
+    override fun deserialize(decoder: Decoder): MessageMetadata {
+        val input = decoder as? JsonDecoder
+            ?: throw SerializationException("MessageMetadata supports JSON only")
+        val value = input.decodeJsonElement()
+        val objectValue = value as? JsonObject
+            ?: throw SerializationException("message metadata must be an object")
+        val audienceValue = objectValue["audience"]
+        if (audienceValue == null || audienceValue is JsonNull) return MessageMetadata()
+        val raw = (audienceValue as? JsonPrimitive)
+            ?.takeIf { it.isString }
+            ?.content
+            ?: throw SerializationException("message metadata audience must be a string")
+        return MessageMetadata(
+            audience = when (raw) {
+                "" -> null
+                "all" -> MessageAudience.ALL
+                "internal" -> MessageAudience.INTERNAL
+                else -> throw SerializationException("unknown message audience: $raw")
+            },
+        )
+    }
+
+    override fun serialize(encoder: Encoder, value: MessageMetadata) {
+        val output = encoder as? JsonEncoder
+            ?: throw SerializationException("MessageMetadata supports JSON only")
+        output.encodeJsonElement(buildJsonObject {
+            value.audience?.let {
+                put(
+                    "audience",
+                    JsonPrimitive(if (it == MessageAudience.ALL) "all" else "internal"),
+                )
+            }
+        })
+    }
+}
 
 /**
  * Audio output route override for a voice call — the "speakerphone" concept,
@@ -389,48 +438,8 @@ data class Message(
     val errorText: String? = null,
     val status: MessageStatus = MessageStatus.DELIVERED,
     val state: MessageState = MessageState.COMPLETED,
-    /** Required when serialization decodes a server or cached row. */
-    val metadata: MessageMetadata,
-) {
-    /**
-     * Source-compatible constructor for locally created values. Serialization
-     * uses the primary constructor above, so decoded metadata cannot be omitted.
-     */
-    constructor(
-        role: MessageRole = MessageRole.EXTERNAL,
-        id: String = "",
-        localId: String? = null,
-        text: String? = null,
-        html: String? = null,
-        timestamp: String? = null,
-        userId: String? = null,
-        userName: String? = null,
-        action: String? = null,
-        attachments: List<Attachment> = emptyList(),
-        buttons: List<MessageButton> = emptyList(),
-        gallery: List<MessageCard> = emptyList(),
-        errorText: String? = null,
-        status: MessageStatus = MessageStatus.DELIVERED,
-        state: MessageState = MessageState.COMPLETED,
-    ) : this(
-        role = role,
-        id = id,
-        localId = localId,
-        text = text,
-        html = html,
-        timestamp = timestamp,
-        userId = userId,
-        userName = userName,
-        action = action,
-        attachments = attachments,
-        buttons = buttons,
-        gallery = gallery,
-        errorText = errorText,
-        status = status,
-        state = state,
-        metadata = MessageMetadata(),
-    )
-}
+    val metadata: MessageMetadata? = null,
+)
 
 /** Payload for [OrigonClient.sendMessage]. Mirrors the Rust `SendMessagePayload` shape. */
 @Serializable
@@ -455,6 +464,8 @@ data class SendMessagePayload(
      * sharing a button value. Leave null for a plain button reply.
      */
     val galleryLabel: String? = null,
+    /** Optional participant/monitor audience metadata. */
+    val metadata: MessageMetadata? = null,
 )
 
 @Serializable
