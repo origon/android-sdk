@@ -118,6 +118,17 @@ registers cross-repository contracts that must change and validate together.
   native cache root. Static clear creates only the fixed cache subtree first so
   clear-before-first-client and repeated clear remain idempotent.
 
+## Voice DTMF ABI
+
+- The low-level ABI adds Kotlin
+  `SessionBridge.sendDtmf(handle,id,digit:Char)` in lockstep with native export
+  `Java_ai_origon_sdk_SessionBridge_sendDtmf(...,jchar)` across all three
+  Android libraries. Rust accepts exactly one uppercase ASCII `0-9*#A-D`
+  symbol and owns voice/session/reconnect validation; errors never echo it.
+- This lane is client-to-flow and send-only. It adds no duration, inbound
+  callback, tone, haptic, or PCM synthesis. The public `OrigonClient` wrapper
+  lands separately against the exact frozen AAR.
+
 ## Release gate
 
 The release AAR must contain arm64-v8a, armeabi-v7a, and x86_64 libraries. AGP
