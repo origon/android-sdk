@@ -127,13 +127,23 @@ segments must remain 0x4000-aligned. Wrapper tests and the example compile must
 pass against the local AAR. Do not publish to Maven Central during an
 implementation spin.
 
-For an owner-authorized exact-artifact release, Gradle properties
-`exactAarPath`, `exactAarSha256`, and explicit `sdkVersion` replace only the
-publication's unclassified AAR with the already-validated file. The exact file
-has no build dependency; normal POM/source/javadoc artifacts remain. The
-`verifyExactAarPublication` task rechecks the SHA-256, coordinate
-`ai.origon:sdk:<version>`, unique AAR binding, and empty build dependency before
-any publish task. `scripts/verify-exact-release-aar.sh` additionally requires
+For an owner-authorized exact-artifact release, Gradle properties for the
+frozen AAR, sources JAR, javadoc JAR, their three SHA-256 values, and explicit
+`sdkVersion` create a dedicated `exact` publication around only those files.
+Its upload task is separate from the normal AGP-backed publication, so Gradle
+module metadata and source generation cannot retain a compile/AAR/native
+rebuild edge. All three exact files have no build dependency. The
+`verifyExactAarPublication` task rechecks every SHA-256, coordinate
+`ai.origon:sdk:<version>`, unique AAR binding, the classified sources/javadoc
+bindings, and empty build dependencies before the exact publish/release tasks.
+The generated exact POM must contain exactly Kotlin stdlib `2.1.0` at compile
+scope plus serialization JSON `1.7.3` and coroutines core `1.8.1` at runtime
+scope; clean consumers must retain the same dependency model as the normal
+AGP-backed publication without pulling its build graph into the release.
+The exact verifier is ordered before Central staging creation as well as upload
+and repository release; invalid hashes or POM metadata must fail before any
+remote staging mutation.
+`scripts/verify-exact-release-aar.sh` additionally requires
 the recorded hash of all three embedded libraries and runs the complete
 stripped/JNI/retired-symbol/alignment verifier. The workspace release driver
 must reject a Central dry-run containing any compile/assemble/AAR bundle/native
