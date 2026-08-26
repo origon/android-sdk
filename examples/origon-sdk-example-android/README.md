@@ -29,7 +29,7 @@ sync, pick a device, and Run.
 
 ### Command line (no Android Studio)
 
-The example defaults to released SDK `0.3.0`. To validate a sibling SDK build,
+The example defaults to released SDK `0.3.1`. To validate a sibling SDK build,
 install the required toolchain, publish it under a unique local version, and
 select the same version explicitly:
 
@@ -88,7 +88,7 @@ mavenLocal()
 
 // app/build.gradle.kts
 val origonSdkVersion = providers.gradleProperty("origonSdkVersion")
-    .getOrElse("0.3.0")
+    .getOrElse("0.3.1")
     .trim()
 implementation("ai.origon:sdk:$origonSdkVersion")
 ```
