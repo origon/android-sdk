@@ -33,7 +33,20 @@ done
 
 staging="$(mktemp -d)"
 trap 'rm -rf "$staging"' EXIT
-unzip -q "$AAR_PATH" 'jni/*/libsession.so' -d "$staging"
+unzip -q "$AAR_PATH" 'classes.jar' 'jni/*/libsession.so' -d "$staging"
+
+command -v javap >/dev/null || { echo "ERROR: javap is required"; exit 1; }
+public_api="$(javap -classpath "$staging/classes.jar" ai.origon.sdk.OrigonClient)"
+[[ "$public_api" == *"public final void sendDtmf(java.lang.String, char);"* ]] || {
+    echo "ERROR: public AAR API is missing OrigonClient.sendDtmf(String, char)"
+    exit 1
+}
+for unsupported in receiveDtmf onDtmf dtmfReceived; do
+    [[ "$public_api" != *"$unsupported"* ]] || {
+        echo "ERROR: public AAR exposes unsupported DTMF receive API $unsupported"
+        exit 1
+    }
+done
 
 bridge_source="sdk/src/main/kotlin/ai/origon/sdk/SessionBridge.kt"
 [[ -f "$bridge_source" ]] || { echo "ERROR: missing JNI producer: $bridge_source"; exit 1; }

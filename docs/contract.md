@@ -127,7 +127,10 @@ registers cross-repository contracts that must change and validate together.
   symbol and owns voice/session/reconnect validation; errors never echo it.
 - This lane is client-to-flow and send-only. It adds no duration, inbound
   callback, tone, haptic, or PCM synthesis. The public `OrigonClient` wrapper
-  lands separately against the exact frozen AAR.
+  exposes `sendDtmf(id:String,digit:Char)` and rejects every value outside
+  uppercase ASCII `0-9*#A-D` before calling JNI. Neither local validation nor
+  native errors echo the symbol, and a failed request is never retried by the
+  wrapper.
 
 ## Release gate
 

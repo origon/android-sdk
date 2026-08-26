@@ -378,6 +378,17 @@ class OrigonClient(
 
     // ── Voice controls ───────────────────────────────────────────────
 
+    /**
+     * Send one DTMF symbol to the active voice session's CX flow.
+     *
+     * [digit] must be one uppercase ASCII symbol from `0-9`, `*`, `#`, or
+     * `A-D`. The SDK sends control data only; it does not synthesize audio,
+     * tones, clicks, or haptics.
+     */
+    fun sendDtmf(id: String, digit: Char) {
+        withHandle { SessionBridge.sendDtmf(it, id, validateDtmfDigit(digit)) }
+    }
+
     fun setMute(id: String, muted: Boolean) {
         withHandle { SessionBridge.setMute(it, id, muted) }
     }
@@ -713,6 +724,15 @@ class OrigonClient(
     }
 
     companion object {
+        private const val DTMF_DIGITS = "0123456789*#ABCD"
+
+        internal fun validateDtmfDigit(digit: Char): Char {
+            require(digit.code <= 0x7f && digit in DTMF_DIGITS) {
+                "DTMF digit must be one uppercase ASCII symbol"
+            }
+            return digit
+        }
+
         /**
          * Synchronously quarantines the SDK-owned cache subtree. Close every live
          * client before calling; physical deletion may finish asynchronously.
