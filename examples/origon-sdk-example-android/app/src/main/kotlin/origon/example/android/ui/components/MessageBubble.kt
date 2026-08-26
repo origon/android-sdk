@@ -5,6 +5,7 @@ import ai.origon.sdk.Message
 import ai.origon.sdk.MessageButton
 import ai.origon.sdk.MessageRole
 import ai.origon.sdk.MessageStatus
+import ai.origon.sdk.TypingParticipant
 import android.content.Intent
 import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
@@ -336,6 +337,23 @@ internal fun exampleMessageAuthor(message: Message): ExampleMessageAuthor = when
     }
     MessageRole.AI, MessageRole.SYSTEM -> ExampleMessageAuthor("assistant", "Assistant")
 }
+
+internal fun exampleTypingAuthor(participant: TypingParticipant?): ExampleMessageAuthor =
+    when (participant?.role) {
+        MessageRole.AI, MessageRole.SYSTEM, null -> ExampleMessageAuthor("assistant", "Assistant")
+        MessageRole.EXTERNAL -> {
+            val name = participant.userName?.trim()?.takeIf(String::isNotEmpty)
+            val identity = participant.userId?.trim()?.takeIf(String::isNotEmpty)
+                ?: name ?: participant.participantId
+            ExampleMessageAuthor("external:${identity.lowercase()}", name ?: "Visitor")
+        }
+        MessageRole.USER -> {
+            val name = participant.userName?.trim()?.takeIf(String::isNotEmpty)
+            val identity = participant.userId?.trim()?.takeIf(String::isNotEmpty)
+                ?: name ?: participant.participantId
+            ExampleMessageAuthor("agent:${identity.lowercase()}", name ?: "Agent")
+        }
+    }
 
 internal fun exampleShouldShowAuthor(message: Message, previous: Message?): Boolean {
     if (!message.action.isNullOrEmpty()) return false

@@ -90,6 +90,22 @@ enum class MessageAudience {
     @SerialName("all") ALL,
 }
 
+/** Server-stamped identity for one active remote typer. Ephemeral: do not persist or log. */
+@Serializable
+data class TypingParticipant(
+    val participantId: String,
+    val role: MessageRole,
+    val userId: String? = null,
+    val userName: String? = null,
+    val audience: MessageAudience,
+)
+
+/** Stable first-activation-ordered snapshot of active remote typers. */
+@Serializable
+data class TypingState(
+    val participants: List<TypingParticipant> = emptyList(),
+)
+
 /** Optional message metadata with strict lowercase wire values. */
 @Serializable(with = MessageMetadataSerializer::class)
 data class MessageMetadata(
@@ -675,7 +691,7 @@ sealed class ClientEvent {
 
     data class Typing(
         override val sessionId: String,
-        val isTyping: Boolean,
+        val state: TypingState,
     ) : ClientEvent()
 
     /**

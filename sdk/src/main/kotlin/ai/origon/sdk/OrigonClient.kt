@@ -608,7 +608,7 @@ class OrigonClient(
                 ClientEvent.ControlUpdated(sid, SessionControl.fromBridge(raw.control))
 
             SessionBridge.EVENT_TYPING ->
-                ClientEvent.Typing(sid, raw.typing)
+                ClientEvent.Typing(sid, decodeTypingState(raw.messageJson) ?: return null)
 
             SessionBridge.EVENT_CHAT_SESSION_ENDED -> {
                 val payload = decodeSessionEnded(raw.messageJson)
@@ -680,6 +680,18 @@ class OrigonClient(
             // server schemas drift. Log only the exception — never the
             // raw JSON, which contains message content.
             android.util.Log.w("OrigonSDK", "decodeMessage: dropping event, JSON parse failed: ${e.message}")
+            null
+        }
+    }
+
+    /** Decode the authoritative typing snapshot from the existing JSON slot. */
+    private fun decodeTypingState(json: String?): TypingState? {
+        if (json.isNullOrEmpty()) return null
+        return try {
+            JSON.decodeFromString(TypingState.serializer(), json)
+        } catch (e: Throwable) {
+            // Never log the payload: it contains ephemeral participant identity.
+            android.util.Log.w("OrigonSDK", "decodeTypingState: dropping event, JSON parse failed: ${e.message}")
             null
         }
     }

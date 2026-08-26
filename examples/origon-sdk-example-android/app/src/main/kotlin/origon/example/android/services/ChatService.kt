@@ -13,6 +13,8 @@ import ai.origon.sdk.SessionException
 import ai.origon.sdk.SessionLoadPolicy
 import ai.origon.sdk.SessionLoadUpdate
 import ai.origon.sdk.StartChatOptions
+import ai.origon.sdk.TypingParticipant
+import ai.origon.sdk.TypingState
 import ai.origon.sdk.UploadProgress
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -82,6 +84,7 @@ class ChatService internal constructor(
     data class SessionUIState(
         val messages: List<Message> = emptyList(),
         val isTyping: Boolean = false,
+        val typingState: TypingState = TypingState(),
         val accessGranted: Boolean = false,
         val connectionState: ConnectionState = ConnectionState.CONNECTED,
         val loadState: DestinationLoadState = DestinationLoadState.IDLE,
@@ -143,6 +146,11 @@ class ChatService internal constructor(
         combine(sessionsState, _currentSessionId) { states, id ->
             id?.let { states[it]?.isTyping } ?: false
         }.stateIn(scope, SharingStarted.Eagerly, false)
+
+    val typingParticipant: StateFlow<TypingParticipant?> =
+        combine(sessionsState, _currentSessionId) { states, id ->
+            id?.let { states[it]?.typingState?.participants?.firstOrNull() }
+        }.stateIn(scope, SharingStarted.Eagerly, null)
 
     val focusedLoadState: StateFlow<DestinationLoadState> =
         combine(sessionsState, _currentSessionId) { states, id ->
@@ -635,7 +643,10 @@ class ChatService internal constructor(
             is ClientEvent.MessageUpdated -> updateMessage(sid, event.id, event.message)
             is ClientEvent.Typing -> sessionsState.update { states ->
                 val s = states[sid] ?: return@update states
-                states + (sid to s.copy(isTyping = event.isTyping))
+                states + (sid to s.copy(
+                    isTyping = event.state.participants.isNotEmpty(),
+                    typingState = event.state,
+                ))
             }
             is ClientEvent.Reconnecting -> updateConnection(
                 sid, ConnectionState.RECONNECTING, accessGranted = false,
@@ -680,6 +691,7 @@ class ChatService internal constructor(
                 connectionState = connection,
                 accessGranted = accessGranted,
                 isTyping = if (connection == ConnectionState.CONNECTED) state.isTyping else false,
+                typingState = if (connection == ConnectionState.CONNECTED) state.typingState else TypingState(),
             ))
         }
     }

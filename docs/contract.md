@@ -30,6 +30,20 @@ registers cross-repository contracts that must change and validate together.
   `/home/yl/workspace/apps/sdk/CONTRACT.md`. This wrapper only decodes the
   already-authorized projection and never chooses or rewrites the audience.
 
+## Authoritative typing identity
+
+- The 0.3.2 candidate hardcuts public `ClientEvent.Typing.isTyping` to
+  `ClientEvent.Typing.state`; `TypingState.participants` preserves stable
+  first-activation order and canonical participant, role, optional user
+  identity, and audience fields.
+- JNI class layout is unchanged: `SessionEvent.typing` remains the aggregate
+  compatibility bit while the authoritative snapshot uses existing
+  `messageJson`. The wrapper decodes it fail-closed and never persists or logs
+  participant identity.
+- The shipped Android app and repository example render the first active
+  participant with one avatar plus the existing capsule and clear on empty or
+  terminal/local lifecycle events.
+
 ## Mobile chat continuity and push
 
 - The wrapper supplies JNI `initialize` with a canonical lowercase UUIDv4 generated

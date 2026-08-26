@@ -17,9 +17,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
@@ -45,7 +48,10 @@ import kotlin.math.sin
  * (`systemGray5` — deliberately NOT the peer tint the message bubbles use).
  */
 @Composable
-fun TypingIndicator(modifier: Modifier = Modifier) {
+internal fun TypingIndicator(
+    modifier: Modifier = Modifier,
+    author: ExampleMessageAuthor = ExampleMessageAuthor("assistant", "Assistant"),
+) {
     val transition = rememberInfiniteTransition(label = "typing")
     // 0..1 phase over one cycle; the sine below turns it into the bounce.
     val phase by transition.animateFloat(
@@ -57,7 +63,20 @@ fun TypingIndicator(modifier: Modifier = Modifier) {
         ),
         label = "phase",
     )
-    Row(modifier = modifier.fillMaxWidth().semantics { contentDescription = "Assistant is typing" }) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = modifier.fillMaxWidth().semantics { contentDescription = "Someone is typing" },
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.size(32.dp).background(OrigonTheme.colors.remoteBubble, CircleShape),
+        ) {
+            Text(
+                text = if (author.key == "assistant") "AI" else author.displayName.take(1).uppercase(),
+                color = OrigonTheme.colors.textSecondary,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
         Row(
             horizontalArrangement = Arrangement.spacedBy(5.dp),
             modifier = Modifier
@@ -88,17 +107,39 @@ fun TypingIndicator(modifier: Modifier = Modifier) {
 /** Full bounce cycle (up + back down), matching iOS's `cycle = 1.0` seconds. */
 private const val CYCLE_MS = 1000
 
-@Preview(name = "typing light", showBackground = true)
+@Preview(name = "named person · light", showBackground = true)
 @Composable
-private fun TypingIndicatorPreviewLight() {
+private fun TypingIndicatorNamedLight() {
+    OrigonTheme(darkTheme = false) {
+        TypingIndicator(
+            Modifier.padding(16.dp),
+            author = ExampleMessageAuthor("user:supervisor-1", "Rich"),
+        )
+    }
+}
+
+@Preview(name = "named person · dark", showBackground = true, backgroundColor = 0xFF111111)
+@Composable
+private fun TypingIndicatorNamedDark() {
+    OrigonTheme(darkTheme = true) {
+        TypingIndicator(
+            Modifier.padding(16.dp),
+            author = ExampleMessageAuthor("user:supervisor-1", "Rich"),
+        )
+    }
+}
+
+@Preview(name = "AI flow · light", showBackground = true)
+@Composable
+private fun TypingIndicatorAIFlowLight() {
     OrigonTheme(darkTheme = false) {
         TypingIndicator(Modifier.padding(16.dp))
     }
 }
 
-@Preview(name = "typing dark", showBackground = true, backgroundColor = 0xFF111111)
+@Preview(name = "AI flow · dark", showBackground = true, backgroundColor = 0xFF111111)
 @Composable
-private fun TypingIndicatorPreviewDark() {
+private fun TypingIndicatorAIFlowDark() {
     OrigonTheme(darkTheme = true) {
         TypingIndicator(Modifier.padding(16.dp))
     }

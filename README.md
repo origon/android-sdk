@@ -369,7 +369,7 @@ while (true) {
         is ClientEvent.MessageUpdated ->
             // Look up the row by event.id (matches the original lookup key)
         is ClientEvent.Typing ->
-            // Show / hide "typing…" indicator
+            // Render event.state.participants.firstOrNull(); hide when empty.
         else -> Unit
     }
 }
@@ -577,6 +577,7 @@ requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, a
 | `DisconnectReason` | sealed class of structured reasons. |
 | `ClientEvent` | sealed class: `MessageAdded`, `MessageUpdated`, `Connected`, `Reconnecting`, `Reconnected`, `PeerAttached`, `PeerDetached`, `Disconnected`, `CallError`, `AudioRouteChanged`, `ControlUpdated`, `Typing`, `SessionUpdated`. Every variant carries `sessionId`. `AudioRouteChanged` carries the now-current `AudioOutputRoute` (drive a speaker toggle from `route == AudioOutputRoute.SPEAKER`); it fires on OS-driven route changes (headset plug/unplug) as well as your own `setAudioOutput`. |
 | `Message` / `MessageMetadata` / `MessageAudience` | typed transcript line with nullable `metadata` and nullable closed audience (`internal` or `all`). Missing/null/empty legacy metadata remains null; unknown non-empty audiences fail decoding. |
+| `TypingState` / `TypingParticipant` | ordered authoritative active-typer snapshot. Render `participants.firstOrNull()` for the one-avatar UI; treat it as ephemeral and never persist/log it. |
 | `Attachment` | uploaded-media descriptor: `id`, `name`, `contentType`, `url`, and an optional client-side `localUrl` preview (kept on the local `Message`, stripped from the wire). Returned by `uploadAttachment(...)`, carried on `Message.attachments`, and passed back into `SendMessagePayload.attachments`. |
 | `UploadProgress` | `bytesUploaded`, optional `totalBytes`, optional `percent` (both `null` when the transport reports no content length). Passed to the `uploadAttachment` `onProgress` callback. |
 | `SessionSnapshot`, `SessionsSnapshot`, load updates | Cache/network snapshots and typed refresh failures emitted by finite flows. |

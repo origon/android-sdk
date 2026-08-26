@@ -124,6 +124,7 @@ import origon.example.android.ui.call.CallView
 import origon.example.android.ui.components.AttachmentsPreview
 import origon.example.android.ui.components.MessageBubble
 import origon.example.android.ui.components.exampleMessageAuthor
+import origon.example.android.ui.components.exampleTypingAuthor
 import origon.example.android.ui.components.exampleShouldShowAuthor
 import origon.example.android.ui.components.OrigonSpinner
 import origon.example.android.ui.components.PrimaryButton
@@ -293,6 +294,7 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     val chat = sdk.chat
     val messages by chat.messages.collectAsState()
     val isTyping by chat.isTyping.collectAsState()
+    val typingParticipant by chat.typingParticipant.collectAsState()
     val pending by chat.pendingAttachments.collectAsState()
     val sessions by sdk.sessions.collectAsState()
     val currentSessionId by chat.currentSessionId.collectAsState()
@@ -572,6 +574,7 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                             Transcript(
                                 messages = messages,
                                 isTyping = isTyping,
+                                typingParticipant = typingParticipant,
                                 revealedKey = revealedKey,
                                 onToggleRevealed = { key ->
                                     revealedKey = if (revealedKey == key) null else key
@@ -853,6 +856,7 @@ private fun EmptyTranscript(greeting: String) {
 private fun Transcript(
     messages: List<Message>,
     isTyping: Boolean,
+    typingParticipant: ai.origon.sdk.TypingParticipant?,
     revealedKey: String?,
     onToggleRevealed: (String) -> Unit,
     onAttachmentTap: (Message, Int) -> Unit,
@@ -957,7 +961,9 @@ private fun Transcript(
             )
         }
         if (isTyping) {
-            item(key = "typing") { TypingIndicator() }
+            item(key = "typing") {
+                TypingIndicator(author = exampleTypingAuthor(typingParticipant))
+            }
         }
     }
 }
