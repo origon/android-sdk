@@ -32,7 +32,7 @@ registers cross-repository contracts that must change and validate together.
 
 ## Authoritative typing identity
 
-- The 0.3.2 candidate hardcuts public `ClientEvent.Typing.isTyping` to
+- Version 0.3.2 hardcuts public `ClientEvent.Typing.isTyping` to
   `ClientEvent.Typing.state`; `TypingState.participants` preserves stable
   first-activation order and canonical participant, role, optional user
   identity, and audience fields.
