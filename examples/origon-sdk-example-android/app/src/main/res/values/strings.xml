@@ -29,6 +29,10 @@
 
     <!-- Call -->
     <string name="call_mic_required">Microphone permission is required for voice calls</string>
+    <string name="call_channel_name">Ongoing calls</string>
+    <string name="call_channel_description">Keeps a call connected while the app is in the background.</string>
+    <string name="call_notification_title">Voice call</string>
+    <string name="call_host_failed">Could not start the protected call.</string>
 
     <!-- Retry / errors -->
     <string name="retry">Retry</string>

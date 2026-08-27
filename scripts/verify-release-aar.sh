@@ -33,7 +33,28 @@ done
 
 staging="$(mktemp -d)"
 trap 'rm -rf "$staging"' EXIT
-unzip -q "$AAR_PATH" 'jni/*/libsession.so' -d "$staging"
+unzip -q "$AAR_PATH" 'classes.jar' 'jni/*/libsession.so' -d "$staging"
+
+command -v javap >/dev/null || { echo "ERROR: javap is required"; exit 1; }
+public_api="$(javap -classpath "$staging/classes.jar" ai.origon.sdk.OrigonClient)"
+[[ "$public_api" == *"public final void sendDtmf(java.lang.String, char);"* ]] || {
+    echo "ERROR: public AAR API is missing OrigonClient.sendDtmf(String, char)"
+    exit 1
+}
+for unsupported in receiveDtmf onDtmf dtmfReceived; do
+    [[ "$public_api" != *"$unsupported"* ]] || {
+        echo "ERROR: public AAR exposes unsupported DTMF receive API $unsupported"
+        exit 1
+    }
+done
+
+bridge_source="sdk/src/main/kotlin/ai/origon/sdk/SessionBridge.kt"
+[[ -f "$bridge_source" ]] || { echo "ERROR: missing JNI producer: $bridge_source"; exit 1; }
+bridge_exports="$(sed -nE 's/.*external fun ([A-Za-z0-9_]+).*/\1/p' "$bridge_source")"
+[[ "$bridge_exports" == *"sendDtmf"* ]] || {
+    echo "ERROR: JNI producer is missing sendDtmf"
+    exit 1
+}
 
 for abi in arm64-v8a armeabi-v7a x86_64; do
     library="$staging/jni/$abi/libsession.so"
@@ -43,13 +64,11 @@ for abi in arm64-v8a armeabi-v7a x86_64; do
     [[ "$sections" != *".symtab"* ]] || { echo "ERROR: $abi still contains .symtab"; exit 1; }
 
     symbols="$($nm -D --defined-only "$library")"
-    for export_name in \
-        restoreActiveChats openChat registerPush unregisterPush \
-        sessionLoaderStart directoryLoaderStart loaderNext loaderCancel loaderFree \
-        removeCachedSession clearChatCache pruneChatCache clearChatCacheRoot; do
+    while IFS= read -r export_name; do
+        [[ -n "$export_name" ]] || continue
         expected="Java_ai_origon_sdk_SessionBridge_${export_name}"
         [[ "$symbols" == *"$expected"* ]] || { echo "ERROR: $abi missing $expected"; exit 1; }
-    done
+    done <<< "$bridge_exports"
     for retired_name in getSessions getSession openChatWithIntent; do
         retired="Java_ai_origon_sdk_SessionBridge_${retired_name}"
         [[ "$symbols" != *"$retired"* ]] || {
@@ -68,5 +87,5 @@ for abi in arm64-v8a armeabi-v7a x86_64; do
             }
         done <<< "$alignments"
     fi
-    echo "verified $abi: stripped, continuity/cache-first JNI exports present"
+    echo "verified $abi: stripped, continuity/cache-first/DTMF JNI exports present"
 done

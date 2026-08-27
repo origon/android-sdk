@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -53,9 +54,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -66,6 +70,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -77,6 +84,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.foundation.layout.width
@@ -86,18 +94,38 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.traversalIndex
+import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import origon.example.android.R
 import origon.example.android.data.PendingAttachment
 import origon.example.android.services.ChatService
+import origon.example.android.services.CallForegroundService
+import origon.example.android.services.CallHostGateResult
+import origon.example.android.services.CallService
+import origon.example.android.services.callPermissionAllowsHost
+import origon.example.android.services.ExampleEndpointPolicy
+import origon.example.android.services.EXAMPLE_NEW_MESSAGES_ACCESSIBILITY_LABEL
+import origon.example.android.services.exampleNewestEligibleMessageId
+import origon.example.android.services.exampleStableKey
+import origon.example.android.services.exampleTranscriptDecision
+import origon.example.android.services.exampleUnreadAnchor
 import origon.example.android.services.SDKManager
 import origon.example.android.ui.call.CallView
 import origon.example.android.ui.components.AttachmentsPreview
 import origon.example.android.ui.components.MessageBubble
+import origon.example.android.ui.components.exampleMessageAuthor
+import origon.example.android.ui.components.exampleTypingAuthor
+import origon.example.android.ui.components.exampleShouldShowAuthor
 import origon.example.android.ui.components.OrigonSpinner
 import origon.example.android.ui.components.PrimaryButton
 import origon.example.android.ui.components.SessionHeader
@@ -266,9 +294,15 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     val chat = sdk.chat
     val messages by chat.messages.collectAsState()
     val isTyping by chat.isTyping.collectAsState()
+    val typingParticipant by chat.typingParticipant.collectAsState()
     val pending by chat.pendingAttachments.collectAsState()
     val sessions by sdk.sessions.collectAsState()
     val currentSessionId by chat.currentSessionId.collectAsState()
+    val connectionState by chat.connectionState.collectAsState()
+    val canSend by chat.canSend.collectAsState()
+    val focusedLoadState by chat.focusedLoadState.collectAsState()
+    val serverConfig by sdk.serverConfig.collectAsState()
+    val endpointPolicy = ExampleEndpointPolicy.from(serverConfig)
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -278,11 +312,56 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     val downloader = rememberAttachmentDownloader { error -> toast.show(error ?: "Saved") }
     val keyboard = LocalSoftwareKeyboardController.current
 
+    var foreground by remember { mutableStateOf(false) }
+    LifecycleResumeEffect(chat) {
+        foreground = true
+        chat.refetchFocusedSession()
+        onPauseOrDispose { foreground = false }
+    }
+
     var draft by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var revealedKey by remember { mutableStateOf<String?>(null) }
-    var callActive by remember { mutableStateOf(false) }
+    var callActive by rememberSaveable { mutableStateOf(false) }
+
+    // Activity state can outlive the process-scoped SDK manager. Never turn a
+    // restored overlay flag into a new microphone call after process death.
+    LaunchedEffect(Unit) {
+        val phase = sdk.call.phase.value
+        if (callActive && (phase is CallService.Phase.Idle || phase is CallService.Phase.Ended)) {
+            callActive = false
+        }
+    }
     var preview by remember { mutableStateOf<PreviewRequest?>(null) }
+    var explicitSendSequence by remember { mutableIntStateOf(0) }
+    var checkpointLoaded by remember { mutableStateOf(false) }
+    var checkpointLastSeenId by remember { mutableStateOf<String?>(null) }
+    var unreadAnchor by remember { mutableStateOf<Int?>(null) }
+    var anchorFixed by remember { mutableStateOf(false) }
+    var lastMarkedCandidate by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(currentSessionId, sdk.checkpointEndpoint) {
+        checkpointLoaded = false
+        checkpointLastSeenId = null
+        unreadAnchor = null
+        anchorFixed = false
+        lastMarkedCandidate = null
+        val id = currentSessionId ?: run {
+            checkpointLoaded = true
+            return@LaunchedEffect
+        }
+        checkpointLastSeenId = sdk.checkpoint(id)?.lastSeenMessageId
+        checkpointLoaded = true
+    }
+
+    val historyAuthoritative = focusedLoadState == ChatService.DestinationLoadState.NETWORK ||
+        focusedLoadState == ChatService.DestinationLoadState.FRESH_EMPTY
+    LaunchedEffect(checkpointLoaded, historyAuthoritative, messages.map { it.id to it.localId }) {
+        if (checkpointLoaded && historyAuthoritative && !anchorFixed) {
+            unreadAnchor = exampleUnreadAnchor(messages, checkpointLastSeenId)
+            anchorFixed = true
+        }
+    }
 
     /**
      * The row the sidebar picked, kept whole rather than as an id: the voice
@@ -372,19 +451,38 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     //     when a Bluetooth headset is actually connected — otherwise every user
     //     sees the "Nearby devices" dialog for nothing.
     val micRequired = stringResource(R.string.call_mic_required)
+    val hostFailed = stringResource(R.string.call_host_failed)
+    val launchProtectedCall: () -> Unit = {
+        scope.launch {
+            when (CallForegroundService.start(context)) {
+                CallHostGateResult.Ready -> callActive = true
+                is CallHostGateResult.Failed -> toast.show(hostFailed)
+            }
+        }
+    }
     val requestCallPermissions = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { _ ->
+    ) { result ->
         // Gate only on the mic — re-check the live grant, since it may have been
         // granted earlier and not be part of this request. A denied (or absent)
         // BLUETOOTH_CONNECT is fine: the call proceeds on the built-in device.
-        if (context.micGranted()) callActive = true else toast.show(micRequired)
+        if (callPermissionAllowsHost(result, context.micGranted())) {
+            launchProtectedCall()
+        } else {
+            toast.show(micRequired)
+        }
     }
 
     val startCall = {
         keyboard?.hide()
         val needed = buildList {
             if (!context.micGranted()) add(Manifest.permission.RECORD_AUDIO)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                context.checkSelfPermissionCompat(Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
                 context.bluetoothHeadsetConnected() &&
                 context.checkSelfPermissionCompat(Manifest.permission.BLUETOOTH_CONNECT) !=
@@ -393,7 +491,8 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                 add(Manifest.permission.BLUETOOTH_CONNECT)
             }
         }
-        if (needed.isEmpty()) callActive = true else requestCallPermissions.launch(needed.toTypedArray())
+        if (needed.isEmpty()) launchProtectedCall() else requestCallPermissions.launch(needed.toTypedArray())
+        Unit
     }
 
     val hasContent = draft.isNotBlank() || pending.isNotEmpty()
@@ -401,6 +500,7 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     val send = {
         val text = draft.trim()
         if (text.isNotEmpty() || pending.isNotEmpty()) {
+            explicitSendSequence++
             scope.launch {
                 // Wait out any in-flight uploads so the send carries them.
                 if (chat.hasUploadingAttachments) {
@@ -451,7 +551,10 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                     // a conversation with content, or a voice row being viewed.
                     showPlus = voice != null || messages.isNotEmpty(),
                     onNewSession = {
-                        chat.endCurrentSession()
+                        scope.launch {
+                            chat.endCurrentSession()
+                            chat.openSession(null)
+                        }
                         selectedSession = null
                     },
                 )
@@ -466,11 +569,12 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                 } else {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         if (messages.isEmpty() && !isTyping) {
-                            EmptyTranscript()
+                            EmptyTranscript(endpointPolicy.greeting)
                         } else {
                             Transcript(
                                 messages = messages,
                                 isTyping = isTyping,
+                                typingParticipant = typingParticipant,
                                 revealedKey = revealedKey,
                                 onToggleRevealed = { key ->
                                     revealedKey = if (revealedKey == key) null else key
@@ -479,7 +583,7 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                                     preview = PreviewRequest(message.attachments, index)
                                 },
                                 onDownloadAttachment = downloader::download,
-                                promptIsLive = chat::promptIsLive,
+                                promptIsLive = { endpointPolicy.promptSendEnabled && chat.promptIsLive(it) },
                                 promptSelection = chat::selectionFor,
                                 onPromptReply = { promptId, cardIndex, label, value, galleryLabel ->
                                     scope.launch {
@@ -492,11 +596,44 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                                         )
                                     }
                                 },
+                                unreadAnchor = unreadAnchor,
+                                checkpointLoaded = checkpointLoaded,
+                                authoritative = historyAuthoritative,
+                                explicitSendSequence = explicitSendSequence,
+                                onLatestRowVisible = {
+                                    val id = currentSessionId
+                                    val candidate = exampleNewestEligibleMessageId(messages)
+                                    if (id != null && candidate != null && foreground &&
+                                        historyAuthoritative && candidate != lastMarkedCandidate
+                                    ) {
+                                        lastMarkedCandidate = candidate
+                                        scope.launch {
+                                            sdk.markCheckpointSeen(id, foreground = true, latestRowVisible = true)
+                                        }
+                                    }
+                                },
                             )
                         }
                     }
 
-                    Composer(
+                    ConnectionStatus(
+                        sessionId = currentSessionId,
+                        connection = connectionState,
+                        canSend = canSend,
+                    )
+                    if (endpointPolicy.showsVoiceOnlyAction) {
+                        PrimaryButton(
+                            title = "Start a call",
+                            onClick = startCall,
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        )
+                    } else if (!endpointPolicy.showsComposer) {
+                        Text(
+                            text = "Messaging and calls are unavailable for this endpoint.",
+                            color = OrigonTheme.colors.textSecondary,
+                            modifier = Modifier.fillMaxWidth().padding(20.dp),
+                        )
+                    } else Composer(
                         draft = draft,
                         onDraftChange = { value ->
                             draft = value
@@ -511,14 +648,27 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                             when (kind) {
                                 AttachKind.MEDIA -> pickMedia.launch(
                                     PickVisualMediaRequest(
-                                        ActivityResultContracts.PickVisualMedia.ImageAndVideo,
+                                        when {
+                                            endpointPolicy.attachments.images && endpointPolicy.attachments.videos ->
+                                                ActivityResultContracts.PickVisualMedia.ImageAndVideo
+                                            endpointPolicy.attachments.images ->
+                                                ActivityResultContracts.PickVisualMedia.ImageOnly
+                                            else -> ActivityResultContracts.PickVisualMedia.VideoOnly
+                                        },
                                     ),
                                 )
-                                AttachKind.FILE -> pickFile.launch(arrayOf("*/*"))
+                                AttachKind.FILE -> pickFile.launch(
+                                    if (endpointPolicy.attachments.documents) arrayOf("*/*")
+                                    else arrayOf("audio/*"),
+                                )
                             }
                         },
                         onSend = send,
                         onStartCall = startCall,
+                        enabled = currentSessionId == null || canSend,
+                        allowMedia = endpointPolicy.attachments.images || endpointPolicy.attachments.videos,
+                        allowFiles = endpointPolicy.attachments.documents || endpointPolicy.attachments.audio,
+                        voiceActionEnabled = endpointPolicy.showsComposerVoiceAction,
                     )
                 }
             }
@@ -662,7 +812,28 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
 private class PreviewRequest(val attachments: List<Attachment>, val index: Int)
 
 @Composable
-private fun EmptyTranscript() {
+private fun ConnectionStatus(
+    sessionId: String?,
+    connection: ChatService.ConnectionState,
+    canSend: Boolean,
+) {
+    if (sessionId == null) return
+    val text = when (connection) {
+        ChatService.ConnectionState.CONNECTED -> if (canSend) null else "Opening conversation…"
+        ChatService.ConnectionState.RECONNECTING -> "Reconnecting…"
+        ChatService.ConnectionState.DROPPED -> "Connection lost. Your next message will retry."
+        ChatService.ConnectionState.ENDED -> "Conversation ended. This transcript is read-only."
+    } ?: return
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = OrigonTheme.colors.textSecondary,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+    )
+}
+
+@Composable
+private fun EmptyTranscript(greeting: String) {
     Column(
         Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,
@@ -674,7 +845,7 @@ private fun EmptyTranscript() {
             modifier = Modifier.size(56.dp).padding(bottom = 24.dp),
         )
         Text(
-            text = stringResource(R.string.chat_empty_greeting),
+            text = greeting,
             style = MaterialTheme.typography.headlineSmall,
             color = OrigonTheme.colors.textPrimary,
         )
@@ -685,6 +856,7 @@ private fun EmptyTranscript() {
 private fun Transcript(
     messages: List<Message>,
     isTyping: Boolean,
+    typingParticipant: ai.origon.sdk.TypingParticipant?,
     revealedKey: String?,
     onToggleRevealed: (String) -> Unit,
     onAttachmentTap: (Message, Int) -> Unit,
@@ -693,14 +865,64 @@ private fun Transcript(
     promptSelection: (String) -> ChatService.PromptSelection?,
     /** `(promptId, cardIndex, label, value, galleryLabel)`. */
     onPromptReply: (String, Int?, String, String, String?) -> Unit,
+    unreadAnchor: Int?,
+    checkpointLoaded: Boolean,
+    authoritative: Boolean,
+    explicitSendSequence: Int,
+    onLatestRowVisible: () -> Unit,
 ) {
     val listState = rememberLazyListState()
+    var positioned by remember { mutableStateOf(false) }
+    var passiveWasAtTail by remember { mutableStateOf(true) }
+    var explicitPending by remember { mutableStateOf(false) }
+    var outgoingBeforeSend by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val outgoingNow = messages.mapIndexedNotNull { index, message ->
+        message.exampleStableKey(index).takeIf { message.role == ai.origon.sdk.MessageRole.EXTERNAL }
+    }.toSet()
+    val messageKeys = messages.mapIndexed { index, message -> message.exampleStableKey(index) }
+    val atTail by remember(messages.size, isTyping) {
+        derivedStateOf {
+            val lastMessage = messages.lastIndex
+            lastMessage < 0 || listState.layoutInfo.visibleItemsInfo.any { it.index == lastMessage }
+        }
+    }
 
-    // Follow the tail as rows land. Keyed on the count AND the typing row so a
-    // peer starting to type also scrolls into view.
-    LaunchedEffect(messages.size, isTyping) {
-        val last = messages.size - if (isTyping) 0 else 1
-        if (last >= 0) listState.animateScrollToItem(last.coerceAtLeast(0))
+    LaunchedEffect(explicitSendSequence) {
+        if (explicitSendSequence > 0) {
+            explicitPending = true
+            outgoingBeforeSend = outgoingNow
+        }
+    }
+
+    LaunchedEffect(checkpointLoaded, authoritative, unreadAnchor, messageKeys) {
+        if (!positioned && checkpointLoaded && authoritative) {
+            val target = unreadAnchor ?: messages.lastIndex
+            if (target >= 0) listState.scrollToItem(target)
+            positioned = true
+            passiveWasAtTail = unreadAnchor == null
+        }
+    }
+
+    LaunchedEffect(messageKeys) {
+        if (!positioned) return@LaunchedEffect
+        val decision = exampleTranscriptDecision(
+            explicitSendPending = explicitPending,
+            outgoingKeysBeforeSend = outgoingBeforeSend,
+            outgoingKeysNow = outgoingNow,
+            positioned = positioned,
+            wasAtTail = passiveWasAtTail,
+        )
+        if (decision.consumeSend) explicitPending = false
+        if (decision.followTail && messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+
+    LaunchedEffect(listState, messages.size) {
+        snapshotFlow { atTail }.collect { latest ->
+            passiveWasAtTail = latest
+            if (latest && messages.isNotEmpty()) onLatestRowVisible()
+        }
     }
 
     LazyColumn(
@@ -712,11 +934,14 @@ private fun Transcript(
         // Keyed on the message's stable key (`localId ?: id`): `MessageBubble`
         // holds position-memoized state, so an un-keyed list would bleed one
         // row's reveal state onto another as rows are inserted.
-        items(messages, key = { it.stableKey() }) { message ->
-            val key = message.stableKey()
+        itemsIndexed(messages, key = { index, message -> message.exampleStableKey(index) }) { index, message ->
+            if (index == unreadAnchor) NewMessagesDivider()
+            val key = message.exampleStableKey(index)
             val hasPrompt = message.buttons.isNotEmpty() || message.gallery.isNotEmpty()
             MessageBubble(
                 message = message,
+                author = exampleMessageAuthor(message),
+                showsAuthor = exampleShouldShowAuthor(message, messages.getOrNull(index - 1)),
                 revealed = revealedKey == key,
                 onToggleRevealed = { onToggleRevealed(key) },
                 onAttachmentTap = { index -> onAttachmentTap(message, index) },
@@ -736,8 +961,33 @@ private fun Transcript(
             )
         }
         if (isTyping) {
-            item(key = "typing") { TypingIndicator() }
+            item(key = "typing") {
+                TypingIndicator(author = exampleTypingAuthor(typingParticipant))
+            }
         }
+    }
+}
+
+@Composable
+private fun NewMessagesDivider() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = EXAMPLE_NEW_MESSAGES_ACCESSIBILITY_LABEL
+                heading()
+            },
+    ) {
+        Box(Modifier.weight(1f).height(1.dp).background(OrigonTheme.colors.border))
+        Text(
+            "NEW MESSAGES",
+            style = MaterialTheme.typography.labelSmall,
+            color = OrigonTheme.colors.textSecondary,
+        )
+        Box(Modifier.weight(1f).height(1.dp).background(OrigonTheme.colors.border))
     }
 }
 
@@ -747,15 +997,39 @@ private fun Transcript(
  * sending → delivered. Inbound rows have no `localId`, so `id` wins. Mirrors
  * `ChatService`'s own key.
  */
-private fun Message.stableKey(): String =
-    localId?.takeIf { it.isNotEmpty() } ?: id
-
 // ── Composer ─────────────────────────────────────────────────────────────
 
-private enum class AttachKind { MEDIA, FILE }
+internal enum class AttachKind { MEDIA, FILE }
+
+internal enum class ExampleComposerPrimary { SEND, START_CALL }
+
+internal data class ExampleComposerPolicy(
+    val primary: ExampleComposerPrimary,
+    val label: String,
+    val enabled: Boolean,
+)
+
+internal fun exampleComposerPolicy(
+    hasContent: Boolean,
+    voiceActionEnabled: Boolean,
+    transportEnabled: Boolean,
+    sending: Boolean,
+): ExampleComposerPolicy {
+    val primary = if (!hasContent && voiceActionEnabled) {
+        ExampleComposerPrimary.START_CALL
+    } else {
+        ExampleComposerPrimary.SEND
+    }
+    return ExampleComposerPolicy(
+        primary = primary,
+        label = if (primary == ExampleComposerPrimary.START_CALL) "Start a call" else "Send message",
+        enabled = transportEnabled && !sending &&
+            (hasContent || primary == ExampleComposerPrimary.START_CALL),
+    )
+}
 
 @Composable
-private fun Composer(
+internal fun Composer(
     draft: String,
     onDraftChange: (String) -> Unit,
     pending: List<PendingAttachment>,
@@ -765,10 +1039,16 @@ private fun Composer(
     onAttach: (AttachKind) -> Unit,
     onSend: () -> Unit,
     onStartCall: () -> Unit,
+    enabled: Boolean,
+    allowMedia: Boolean,
+    allowFiles: Boolean,
+    voiceActionEnabled: Boolean,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val attachInteraction = remember { MutableInteractionSource() }
     val sendInteraction = remember { MutableInteractionSource() }
+    val haptic = LocalHapticFeedback.current
+    val policy = exampleComposerPolicy(hasContent, voiceActionEnabled, enabled, sending)
 
     Column(
         Modifier
@@ -792,17 +1072,23 @@ private fun Composer(
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().semantics { isTraversalGroup = true },
         ) {
-            Box {
+            if (allowMedia || allowFiles) Box {
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(44.dp)
+                        .semantics {
+                            role = Role.Button
+                            contentDescription = "Add attachment"
+                            traversalIndex = 1f
+                        }
                         .clickable(
                             interactionSource = attachInteraction,
                             indication = null,
-                            onClickLabel = "Attach",
+                            enabled = enabled,
+                            onClickLabel = "Add attachment",
                             onClick = { menuOpen = true },
                         ),
                 ) {
@@ -814,14 +1100,14 @@ private fun Composer(
                     )
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(
+                    if (allowMedia) DropdownMenuItem(
                         text = { Text(stringResource(R.string.attach_photo_library)) },
                         onClick = {
                             menuOpen = false
                             onAttach(AttachKind.MEDIA)
                         },
                     )
-                    DropdownMenuItem(
+                    if (allowFiles) DropdownMenuItem(
                         text = { Text(stringResource(R.string.attach_files)) },
                         onClick = {
                             menuOpen = false
@@ -837,7 +1123,15 @@ private fun Composer(
                 textStyle = MaterialTheme.typography.bodyLarge
                     .copy(color = OrigonTheme.colors.textPrimary),
                 cursorBrush = SolidColor(OrigonTheme.colors.textPrimary),
-                modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+                enabled = enabled,
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 44.dp)
+                    .padding(horizontal = 4.dp)
+                    .semantics {
+                        contentDescription = "Message"
+                        traversalIndex = 2f
+                    },
                 decorationBox = { field ->
                     Box(contentAlignment = Alignment.CenterStart) {
                         if (draft.isEmpty()) {
@@ -855,23 +1149,31 @@ private fun Composer(
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primary)
                     .clickable(
                         interactionSource = sendInteraction,
                         indication = null,
-                        enabled = !sending,
-                        onClickLabel = if (hasContent) "Send" else "Start a call",
-                        onClick = { if (hasContent) onSend() else onStartCall() },
-                    ),
+                        enabled = policy.enabled,
+                        onClickLabel = policy.label,
+                        role = Role.Button,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            if (policy.primary == ExampleComposerPrimary.SEND) onSend() else onStartCall()
+                        },
+                    )
+                    .semantics {
+                        contentDescription = policy.label
+                        traversalIndex = 3f
+                    },
             ) {
                 if (sending) {
                     OrigonSpinner(MaterialTheme.colorScheme.onPrimary)
                 } else {
                     Icon(
                         painterResource(
-                            if (hasContent) R.drawable.ic_send else R.drawable.ic_voice,
+                            if (policy.primary == ExampleComposerPrimary.SEND) R.drawable.ic_send else R.drawable.ic_voice,
                         ),
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onPrimary,

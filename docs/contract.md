@@ -17,6 +17,33 @@ registers cross-repository contracts that must change and validate together.
   in `/home/yl/workspace/apps/sdk/CONTRACT.md`. This wrapper adds no alternate
   envelope or persistence.
 
+## Live-chat audience metadata
+
+- Version 0.3.1 mirrors apps/sdk's two-level optional boundary as nullable
+  `Message.metadata`, nullable `MessageMetadata.audience`, and nullable
+  `SendMessagePayload.metadata`. Missing/null/empty values remain null,
+  explicit lowercase `internal|all` values are preserved, and every other
+  non-empty value fails without trimming. Encoding omits null while preserving
+  an explicitly supplied empty metadata object as `{}`.
+- Canonical wire production and validation are registered in
+  `/home/yl/workspace/platform/cx/CONTRACT.md` and
+  `/home/yl/workspace/apps/sdk/CONTRACT.md`. This wrapper only decodes the
+  already-authorized projection and never chooses or rewrites the audience.
+
+## Authoritative typing identity
+
+- Version 0.3.2 hardcuts public `ClientEvent.Typing.isTyping` to
+  `ClientEvent.Typing.state`; `TypingState.participants` preserves stable
+  first-activation order and canonical participant, role, optional user
+  identity, and audience fields.
+- JNI class layout is unchanged: `SessionEvent.typing` remains the aggregate
+  compatibility bit while the authoritative snapshot uses existing
+  `messageJson`. The wrapper decodes it fail-closed and never persists or logs
+  participant identity.
+- The shipped Android app and repository example render the first active
+  participant with one avatar plus the existing capsule and clear on empty or
+  terminal/local lifecycle events.
+
 ## Mobile chat continuity and push
 
 - The wrapper supplies JNI `initialize` with a canonical lowercase UUIDv4 generated
@@ -91,6 +118,20 @@ registers cross-repository contracts that must change and validate together.
   native cache root. Static clear creates only the fixed cache subtree first so
   clear-before-first-client and repeated clear remain idempotent.
 
+## Voice DTMF ABI
+
+- The low-level ABI adds Kotlin
+  `SessionBridge.sendDtmf(handle,id,digit:Char)` in lockstep with native export
+  `Java_ai_origon_sdk_SessionBridge_sendDtmf(...,jchar)` across all three
+  Android libraries. Rust accepts exactly one uppercase ASCII `0-9*#A-D`
+  symbol and owns voice/session/reconnect validation; errors never echo it.
+- This lane is client-to-flow and send-only. It adds no duration, inbound
+  callback, tone, haptic, or PCM synthesis. The public `OrigonClient` wrapper
+  exposes `sendDtmf(id:String,digit:Char)` and rejects every value outside
+  uppercase ASCII `0-9*#A-D` before calling JNI. Neither local validation nor
+  native errors echo the symbol, and a failed request is never retried by the
+  wrapper.
+
 ## Release gate
 
 The release AAR must contain arm64-v8a, armeabi-v7a, and x86_64 libraries. AGP
@@ -99,3 +140,25 @@ absent while all current JNI exports remain in `.dynsym`, and 64-bit PT_LOAD
 segments must remain 0x4000-aligned. Wrapper tests and the example compile must
 pass against the local AAR. Do not publish to Maven Central during an
 implementation spin.
+
+For an owner-authorized exact-artifact release, Gradle properties for the
+frozen AAR, sources JAR, javadoc JAR, their three SHA-256 values, and explicit
+`sdkVersion` create a dedicated `exact` publication around only those files.
+Its upload task is separate from the normal AGP-backed publication, so Gradle
+module metadata and source generation cannot retain a compile/AAR/native
+rebuild edge. All three exact files have no build dependency. The
+`verifyExactAarPublication` task rechecks every SHA-256, coordinate
+`ai.origon:sdk:<version>`, unique AAR binding, the classified sources/javadoc
+bindings, and empty build dependencies before the exact publish/release tasks.
+The generated exact POM must contain exactly Kotlin stdlib `2.1.0` at compile
+scope plus serialization JSON `1.7.3` and coroutines core `1.8.1` at runtime
+scope; clean consumers must retain the same dependency model as the normal
+AGP-backed publication without pulling its build graph into the release.
+The exact verifier is ordered before Central staging creation as well as upload
+and repository release; invalid hashes or POM metadata must fail before any
+remote staging mutation.
+`scripts/verify-exact-release-aar.sh` additionally requires
+the recorded hash of all three embedded libraries and runs the complete
+stripped/JNI/retired-symbol/alignment verifier. The workspace release driver
+must reject a Central dry-run containing any compile/assemble/AAR bundle/native
+merge/strip task before an owner may authorize upload.

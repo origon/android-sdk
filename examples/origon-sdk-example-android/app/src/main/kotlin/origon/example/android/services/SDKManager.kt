@@ -47,12 +47,24 @@ class SDKManager(private val appContext: Context) {
     private val _sessions = MutableStateFlow<List<SessionSummary>>(emptyList())
     val sessions: StateFlow<List<SessionSummary>> = _sessions.asStateFlow()
 
+    private val configReplacement = ExampleConfigReplacement()
+    private val checkpointStore = ExampleCheckpointStore(NoBackupCheckpointFiles(appContext))
+    var checkpointEndpoint: String? = null
+        private set
+    private val _serverConfig = MutableStateFlow<ExampleServerConfig?>(null)
+    val serverConfig: StateFlow<ExampleServerConfig?> = _serverConfig.asStateFlow()
+    val endpointPolicy: ExampleEndpointPolicy
+        get() = ExampleEndpointPolicy.from(_serverConfig.value)
+
     /** Broadcast of every event drained from [OrigonClient.pollEvent]. */
     private val _events = MutableSharedFlow<ClientEvent>(extraBufferCapacity = 256)
     val events: SharedFlow<ClientEvent> = _events.asSharedFlow()
 
     var client: OrigonClient? = null
         private set
+
+    internal val chatClient: ChatSessionClient?
+        get() = client?.let(::OrigonChatSessionClient)
 
     // Child services subscribe to `events` in their constructors. `scope`
     // and `_events` are initialized above, so this ordering is safe.
@@ -65,6 +77,9 @@ class SDKManager(private val appContext: Context) {
 
     /** Connect to the Origon backend and start the event poll loop. */
     suspend fun initialize(endpoint: String, userId: String? = null, token: String? = null) {
+        val configToken = configReplacement.begin()
+        _serverConfig.value = null
+        chat.clientWillChange()
         val config = ClientConfig(
             endpoint = endpoint,
             token = token,
@@ -73,19 +88,59 @@ class SDKManager(private val appContext: Context) {
         // OrigonClient(...) blocks on the FFI runtime during the /config
         // round trip — keep it off the main thread.
         val newClient = withContext(Dispatchers.IO) { OrigonClient(appContext, config) }
+        val cachedConfig = ExampleServerConfig.from(newClient.serverConfig)
+        if (!configReplacement.install(cachedConfig, configToken)) {
+            newClient.close()
+            return
+        }
         client = newClient
+        checkpointEndpoint = endpoint
+        _serverConfig.value = cachedConfig
+        chat.clientDidChange()
         _isReady.value = true
         startPolling()
     }
 
     /** Destroy the client, reset child services, and stop polling. */
     fun teardown() {
+        configReplacement.begin()
+        _serverConfig.value = null
         stopPolling()
         chat.destroy()
         _sessions.value = emptyList()
         client?.close()
         client = null
+        checkpointEndpoint = null
         _isReady.value = false
+    }
+
+    internal suspend fun checkpoint(sessionId: String): ExampleCheckpoint? {
+        val endpoint = checkpointEndpoint ?: return null
+        return runCatching {
+            checkpointStore.read(endpoint, sessionId, System.currentTimeMillis())
+        }.getOrNull()
+    }
+
+    internal suspend fun markCheckpointSeen(
+        sessionId: String,
+        foreground: Boolean,
+        latestRowVisible: Boolean,
+    ) {
+        val endpoint = checkpointEndpoint ?: return
+        val load = chat.focusedLoadState.value
+        runCatching {
+            checkpointStore.markSeen(
+                endpoint = endpoint,
+                sessionId = sessionId,
+                messageId = exampleNewestEligibleMessageId(chat.messages.value),
+                authoritative = load == ChatService.DestinationLoadState.NETWORK ||
+                    load == ChatService.DestinationLoadState.FRESH_EMPTY,
+                foreground = foreground,
+                detailVisible = chat.currentSessionId.value == sessionId,
+                latestRowVisible = latestRowVisible,
+                now = System.currentTimeMillis(),
+            )
+        }
     }
 
     // MARK: - Sessions (shared between call and chat)

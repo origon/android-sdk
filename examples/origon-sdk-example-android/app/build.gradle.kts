@@ -6,6 +6,13 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val origonSdkVersion = providers.gradleProperty("origonSdkVersion")
+    .getOrElse("0.3.2")
+    .trim()
+require(origonSdkVersion.isNotEmpty() && !origonSdkVersion.any(Char::isWhitespace)) {
+    "origonSdkVersion must be one exact, nonblank Maven version"
+}
+
 android {
     namespace = "origon.example.android"
     // compileSdk 37 / targetSdk 36 — the pairing `apps/android` already
@@ -25,6 +32,7 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildFeatures {
@@ -61,7 +69,7 @@ android {
 }
 
 dependencies {
-    implementation("ai.origon:sdk:0.0.0-LOCAL")
+    implementation("ai.origon:sdk:$origonSdkVersion")
     // ClientConfig exposes a kotlinx JsonObject in its public API but the
     // SDK declares the dependency as `implementation`, so consumers must
     // add it explicitly to satisfy the compiler.
@@ -97,5 +105,26 @@ dependencies {
     // needs the HTTP client directly and not only through coil.
     implementation("com.squareup.okhttp3:okhttp:5.4.0")
 
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    implementation("org.jsoup:jsoup:1.23.1")
+    implementation("org.commonmark:commonmark:0.30.0")
+    implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.30.0")
+
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
+    constraints {
+        add(
+            "coreLibraryDesugaring",
+            "com.android.tools:desugar_jdk_libs_configuration_nio:2.1.5",
+        ) {
+            version { strictly("2.1.5") }
+            because("the reviewed NIO desugar runtime has one exact configuration companion")
+        }
+    }
+
+    testImplementation("org.jetbrains.kotlin:kotlin-test-junit:2.4.10")
+    androidTestImplementation("androidx.test:core:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation(platform("androidx.compose:compose-bom:2026.06.01"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

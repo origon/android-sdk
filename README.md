@@ -77,7 +77,7 @@ In your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("ai.origon:sdk:0.2.0")
+    implementation("ai.origon:sdk:0.3.2")
 }
 ```
 
@@ -91,8 +91,8 @@ calls — under
 See its [README](https://github.com/Origon/android-sdk/blob/main/examples/origon-sdk-example-android/README.md)
 for build and run instructions (Android Studio or a no-IDE `run.sh` path),
 plus a guide to which files to read first when wiring the SDK into your own
-app. `RootChatFragment.startCall()` there shows the full mic + Bluetooth
-permission flow in one place.
+app. `RootChatScreen` and `CallForegroundService` there show the complete
+permission, foreground-promotion, audio-focus, and native-start ordering.
 
 ## Quick Start
 
@@ -113,7 +113,7 @@ val client = OrigonClient(
 )
 
 // Start a voice session.
-val response = client.startSession(StartSessionOptions(channel = Channel.VOICE))
+val response = client.startCall(StartCallOptions())
 println("session ${response.sessionId} dialing ${response.url}")
 
 // Drain the event stream.
@@ -144,7 +144,7 @@ responsibility, not the SDK's — the SDK has no `Activity` to drive the
 permission dialog.
 
 ```kotlin
-// In an Activity / Fragment — request before calling startSession(VOICE).
+// In a visible Activity / Fragment — request before hosting and starting a call.
 private val requestMic = registerForActivityResult(
     ActivityResultContracts.RequestPermission()
 ) { granted ->
@@ -213,8 +213,8 @@ private fun maybeRequestBluetooth(am: AudioManager) {
 }
 ```
 
-See `RootChatFragment.startCall()` in the example app for the full flow
-(mic + conditional Bluetooth) in one place.
+See `RootChatScreen` in the example app for the mic, notification, and
+conditional Bluetooth permission flow.
 
 **Graceful fallback:** this permission is _not_ required for a call to
 succeed. If `BLUETOOTH_CONNECT` is missing (or the headset's SCO link
@@ -227,11 +227,49 @@ used.
 > `Bluetooth SCO did not connect within 4s; falling back to built-in audio`,
 > and the call uses the phone's mic/earpiece instead of the headset.
 
+### Foreground host for background/screen-off calls
+
+The SDK owns the native voice session, but the host app owns Android's
+foreground-service and audio-focus lifecycle. Declare a private microphone
+service and the platform permissions (the service belongs in your app, not a
+library manifest):
+
+```xml
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
+<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+<service
+    android:name=".CallForegroundService"
+    android:exported="false"
+    android:foregroundServiceType="microphone" />
+```
+
+From a visible Activity, request `RECORD_AUDIO`, call
+`startForegroundService`, and have the service immediately call
+`startForeground` with a neutral ongoing call notification and hang-up action.
+Bind and wait for acknowledgement **after** promotion (use a bounded timeout,
+five seconds in the example), then acquire voice-call audio focus, and only then
+call `client.startCall`. On permission, start, promotion, binding, focus-setup
+exception, or timeout failure, stop/unbind the service and do not enter the SDK. Android 13+
+`POST_NOTIFICATIONS` denial does not by itself prevent a successfully promoted
+foreground service; the task remains visible in Task Manager.
+
+Make start/end idempotent. Remote disconnect, local end, notification hang-up,
+SDK-start failure, and an orphan service after process recreation must all
+abandon focus and remove the foreground notification. See the example's
+`CallForegroundService`, `CallHostGate`, and `RootChatScreen` for this ordering.
+
 ### Voice controls
 
 ```kotlin
 // Mute (per session).
 client.setMute(id = response.sessionId, muted = true)
+
+// Send one DTMF digit to the active CX flow. Valid symbols are 0-9, *, #, A-D.
+client.sendDtmf(id = response.sessionId, digit = '5')
 
 // Audio output route — process-global, so no session id. Applied via
 // AudioManager (speakerphone / Bluetooth SCO). Resets to AUTOMATIC on each
@@ -254,8 +292,7 @@ client.endAllSessions()
 ### Joining a pre-obtained session
 
 ```kotlin
-client.joinSession(JoinSessionInput(
-    channel = Channel.VOICE,
+client.joinCall(JoinInput(
     sessionId = "...",
     url = "...",
     token = "...",
@@ -265,11 +302,16 @@ client.joinSession(JoinSessionInput(
 ### Chat
 
 `sendMessage`, `notifyTyping`, and `stopTyping` all require an active
-chat session. **Call `startSession(channel = Channel.CHAT, ...)`
-first** — otherwise these throw `SessionException(kind = NO_SESSION)`.
+chat session. **Call `startChat(...)` with its first message first** — otherwise
+these throw `SessionException(kind = NO_SESSION)`.
 The same applies after `endSession(id)`.
 
 ```kotlin
+val started = client.startChat(
+    StartChatOptions(firstMessage = SendMessagePayload(text = "hello")),
+)
+val sessionId = started.sessionId
+
 // Outbound send. The SDK fires ClientEvent.MessageAdded (status =
 // SENDING) before the wire round-trip and ClientEvent.MessageUpdated
 // (delivered or failed) after — both surface on pollEvent(). The
@@ -330,7 +372,7 @@ while (true) {
         is ClientEvent.MessageUpdated ->
             // Look up the row by event.id (matches the original lookup key)
         is ClientEvent.Typing ->
-            // Show / hide "typing…" indicator
+            // Render event.state.participants.firstOrNull(); hide when empty.
         else -> Unit
     }
 }
@@ -371,7 +413,9 @@ sent.
 ### Push notifications
 
 Register this device's FCM token so the backend can deliver push
-notifications. The host app owns token acquisition — set up
+notifications. Use **data-only** messages; notification messages may be handled
+by the OS in the background before your generation check runs. The host app
+owns token acquisition — set up
 [Firebase Cloud Messaging](https://firebase.google.com/docs/cloud-messaging/android/client)
 (its `google-services.json`, the `com.google.gms.google-services` plugin,
 and the `com.google.firebase:firebase-messaging` dependency), then
@@ -384,6 +428,17 @@ import com.google.firebase.messaging.FirebaseMessagingService
 class AppMessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
         OrigonPushNotifications.onNewToken(token)
+    }
+
+    override fun onMessageReceived(message: RemoteMessage) {
+        val payload = OrigonPushNotifications.currentPayload(this, message.data)
+            ?: return showAppOwnedGenericNotification()
+        showAuthorizedNotification(
+            payload,
+            routingData = message.data.filterKeys {
+                it in setOf("type", "sessionId", "clientId", "messageId", "endpointGeneration")
+            },
+        )
     }
 }
 ```
@@ -413,10 +468,13 @@ title is exposed as `null`. Never read `message.data["title"]` or
 exact `endpointGeneration` match, and returns `null` when the generation is
 missing or stale.
 
-Use a stable `PendingIntent` carrying `sessionId`; when the user taps, initialize
-the client and call `OrigonPushNotifications.open(client, payload)`. A tap is
-explicit takeover intent; background receipt is not. Keep tap extras to routing
-and authorization fields—do not copy `title` or `preview` into them.
+Use a stable immutable `PendingIntent` carrying only routing and authorization
+fields. On a tap—even after process death—rebuild a string map, call
+`currentPayload` again, initialize the client, then call
+`OrigonPushNotifications.open(client, payload)`. A tap is explicit takeover
+intent; background receipt is not. Never place `title` or `preview` in tap
+extras, and cancel an authorized notification if the generation no longer
+matches at tap time.
 
 Declare the service in your `AndroidManifest.xml`:
 
@@ -444,6 +502,13 @@ unregister before closing the client and cancel delivered notifications. An
 uninstall cannot send logout; FCM invalid-token feedback and the server's
 90-day endpoint TTL perform eventual cleanup.
 
+Data delivery is not a durable queue: the OS/FCM may delay or drop messages,
+and an Android package in the force-stopped state receives nothing until the
+user launches it again. Always refresh authoritative session history on launch,
+foreground, reconnect, and tap; push is a wake-up hint, never the source of
+chat truth. Do not log FCM tokens, endpoint generations, raw data maps,
+installation identifiers, endpoint query strings, titles, or previews.
+
 ```kotlin
 // On logout:
 client.unregisterForPushNotifications() // waits for exact unregister
@@ -469,11 +534,12 @@ requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, a
 | `OrigonClient(config)` | Create a new client. Throws `SessionException` on connect failure. |
 | `close()` | Release the native handle. |
 | `pollEvent()` | Non-blocking poll. Returns `null` when idle. |
-| `startSession(options)` | Open a session. Returns `(sessionId, url, token)`. |
+| `startCall(options)` / `startChat(options)` | Open voice or chat. Chat requires its first message. Returns `(sessionId, url, token)`. |
 | `restoreActiveChats()` | Passively attach retained active chats and return per-id outcomes. |
 | `openChat(sessionId, intent)` | Open one retained chat with `PASSIVE`, `EXPLICIT_NAVIGATION`, or `NOTIFICATION` authority. |
-| `joinSession(input)` | Attach to a previously-obtained `StartSessionResponse`. |
+| `joinCall(input)` / `joinChat(input)` | Attach to a previously-obtained `StartSessionResponse`. |
 | `endSession(id)` / `endAllSessions()` | Close a single / every session. |
+| `sendDtmf(id, digit)` | Voice — send one uppercase ASCII `0-9`, `*`, `#`, or `A-D` control symbol to the CX flow. Produces no local tone or haptic. |
 | `setMute(id, muted)` / `setMuteAll(muted)` | Voice — absolute mute. |
 | `setAudioOutput(route)` | Voice — override the audio output route (`SPEAKER` / `AUTOMATIC` / `BLUETOOTH`). Process-global. |
 | `sendMessage(id, payload)` | Chat — POST `<sessionUrl>/message`. Returns the server-issued `Message`. Fires `MessageAdded` then `MessageUpdated`. |
@@ -487,7 +553,7 @@ requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, a
 | `cachedSession(s)` / `refreshSession(s)` | Explicit suspend cache-only / network-only reads. |
 | `removeCachedSession` / `clearChatCache` / `pruneChatCache` | Suspend cache maintenance scoped to this client. |
 | `OrigonClient.clearAllChatCaches(context)` | Handle-independent cache-root quarantine; close live clients first. |
-| `setAttributes(attributes)` | Replace session-level attributes injected as `data.attributes` on `startSession`. |
+| `setAttributes(attributes)` | Replace session-level attributes injected on the next start. |
 | `OrigonClient.registerForPushNotifications(token)` | Companion. Register an FCM token (buffered until init; latest wins). |
 | `OrigonClient.unregisterForPushNotifications()` | Companion. Remove this device's push registration (e.g. on logout). |
 | `OrigonPushNotifications.currentPayload(context, data)` | Validate the exact endpoint generation, then expose routing plus optional authorized `title` / `preview`; returns `null` for missing or stale authority. |
@@ -505,20 +571,21 @@ requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, a
 | `MessageStatus` | `SENDING`, `DELIVERED`, `FAILED`. |
 | `MessageState` | `STREAMING`, `COMPLETED`. |
 | `AudioOutputRoute` | `AUTOMATIC` (default route — earpiece / wired / Bluetooth), `SPEAKER` (loudspeaker), `BLUETOOTH`. Argument to `setAudioOutput(route)`. |
-| `StartSessionOptions` | channel, optional sessionId, optional `data` (raw JSON). |
+| `StartCallOptions` / `StartChatOptions` | Voice options; chat options with required first message; optional session id and raw JSON `data`. |
 | `StartSessionResponse` | sessionId, url, token. |
-| `JoinSessionInput` | channel, sessionId, url, token. |
+| `JoinInput` | sessionId, url, token, passed to `joinCall` or `joinChat`. |
 | `ActiveSession` | sessionId, channel. |
 | `OrigonNotificationPayload` | Authorized notification routing plus optional `title` and `preview`; blank title is `null`. |
 | `AttachmentRule` / `AttachmentPolicy` | tenant policy for attachments. |
 | `ServerConfig` | full `/config` snapshot (start message, capability flags, attachment policy). |
 | `DisconnectReason` | sealed class of structured reasons. |
 | `ClientEvent` | sealed class: `MessageAdded`, `MessageUpdated`, `Connected`, `Reconnecting`, `Reconnected`, `PeerAttached`, `PeerDetached`, `Disconnected`, `CallError`, `AudioRouteChanged`, `ControlUpdated`, `Typing`, `SessionUpdated`. Every variant carries `sessionId`. `AudioRouteChanged` carries the now-current `AudioOutputRoute` (drive a speaker toggle from `route == AudioOutputRoute.SPEAKER`); it fires on OS-driven route changes (headset plug/unplug) as well as your own `setAudioOutput`. |
-| `Message` | typed transcript line. Carries `id`, `localId`, `role`, `text`, `html`, `userId`, `userName`, `timestamp`, `attachments`, `errorText`, `status`, `state`. |
+| `Message` / `MessageMetadata` / `MessageAudience` | typed transcript line with nullable `metadata` and nullable closed audience (`internal` or `all`). Missing/null/empty legacy metadata remains null; unknown non-empty audiences fail decoding. |
+| `TypingState` / `TypingParticipant` | ordered authoritative active-typer snapshot. Render `participants.firstOrNull()` for the one-avatar UI; treat it as ephemeral and never persist/log it. |
 | `Attachment` | uploaded-media descriptor: `id`, `name`, `contentType`, `url`, and an optional client-side `localUrl` preview (kept on the local `Message`, stripped from the wire). Returned by `uploadAttachment(...)`, carried on `Message.attachments`, and passed back into `SendMessagePayload.attachments`. |
 | `UploadProgress` | `bytesUploaded`, optional `totalBytes`, optional `percent` (both `null` when the transport reports no content length). Passed to the `uploadAttachment` `onProgress` callback. |
 | `SessionSnapshot`, `SessionsSnapshot`, load updates | Cache/network snapshots and typed refresh failures emitted by finite flows. |
-| `SendMessagePayload` | `text`, `html`, `attachments` (input shape for `sendMessage(id, payload)`). |
+| `SendMessagePayload` | `text`, `html`, `attachments`, and nullable `metadata` (input shape for `sendMessage(id, payload)`). |
 
 ## License
 

@@ -3,14 +3,37 @@ package ai.origon.sdk
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 
 class MobileContinuityTest {
     private val json = Json { ignoreUnknownKeys = true }
+
+    @Test
+    fun dtmfValidationAcceptsExactlyThePublicAlphabet() {
+        for (digit in "0123456789*#ABCD") {
+            assertEquals(digit, OrigonClient.validateDtmfDigit(digit))
+        }
+    }
+
+    @Test
+    fun dtmfValidationRejectsLowercaseAndNonAsciiWithConstantError() {
+        for (digit in listOf('a', 'd', 'é', '１', '\uD83D')) {
+            val error = assertFailsWith<IllegalArgumentException> {
+                OrigonClient.validateDtmfDigit(digit)
+            }
+            assertEquals(
+                "DTMF digit must be one uppercase ASCII symbol",
+                error.message,
+            )
+        }
+    }
 
     @Test
     fun durableCachePolicyDefaultsOnAndCanBeDisabled() {
@@ -29,6 +52,60 @@ class MobileContinuityTest {
 
         val legacy = """{"sessionId":"s","subject":"x","channel":"chat","createdAt":"c","updatedAt":"u"}"""
         assertFails { json.decodeFromString<SessionSummary>(legacy) }
+    }
+
+    @Test
+    fun messageAndSendPayloadPreserveOptionalAudienceMetadata() {
+        val internalRow = """{"id":"m1","metadata":{"audience":"internal"}}"""
+        assertEquals(
+            MessageAudience.INTERNAL,
+            json.decodeFromString<Message>(internalRow).metadata?.audience,
+        )
+        assertEquals(
+            MessageAudience.ALL,
+            json.decodeFromString<Message>("""{"id":"m1a","metadata":{"audience":"all"}}""")
+                .metadata?.audience,
+        )
+
+        for (row in listOf("""{"id":"m2"}""", """{"id":"m2","metadata":null}""")) {
+            assertNull(json.decodeFromString<Message>(row).metadata)
+        }
+
+        for (row in listOf(
+            """{"id":"m3","metadata":{}}""",
+            """{"id":"m3","metadata":{"audience":null}}""",
+            """{"id":"m3","metadata":{"audience":""}}""",
+        )) {
+            assertNull(json.decodeFromString<Message>(row).metadata?.audience)
+        }
+
+        assertNull(Message(id = "local").metadata)
+
+        val unknown = """{"id":"m4","metadata":{"audience":"staff"}}"""
+        assertFails { json.decodeFromString<Message>(unknown) }
+        assertFails { json.decodeFromString<Message>("""{"id":"m5","metadata":{"audience":" "}}""") }
+
+        assertFalse(json.encodeToString(SendMessagePayload(text = "hello")).contains("metadata"))
+        assertEquals(
+            emptySet(),
+            json.parseToJsonElement(
+                json.encodeToString(SendMessagePayload(metadata = MessageMetadata())),
+            ).jsonObject.getValue("metadata").jsonObject.keys,
+        )
+        assertEquals(
+            "all",
+            json.parseToJsonElement(
+                json.encodeToString(
+                    SendMessagePayload(metadata = MessageMetadata(MessageAudience.ALL)),
+                ),
+            ).jsonObject.getValue("metadata").jsonObject.getValue("audience").toString().trim('"'),
+        )
+    }
+
+    @Test
+    fun sessionSummaryLastMessageAcceptsLegacyMissingMetadata() {
+        val row = """{"sessionId":"s","subject":"Support","channel":"chat","active":false,"createdAt":"c","updatedAt":"u","lastMessage":{"id":"m","role":"external","attachments":[],"status":"delivered","state":"completed"}}"""
+        assertNull(json.decodeFromString<SessionSummary>(row).lastMessage?.metadata)
     }
 
     @Test

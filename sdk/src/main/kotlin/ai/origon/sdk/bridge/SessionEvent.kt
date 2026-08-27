@@ -18,7 +18,7 @@ package ai.origon.sdk.bridge
  * | `EVENT_MESSAGE_UPDATED`          | `sessionId`, `messageJson`, `updateId` (provisional localId or message.id) |
  * | `EVENT_SESSION_UPDATED`          | `sessionId`, `newSessionId`                                             |
  * | `EVENT_CONTROL_UPDATED`          | `sessionId`, `control`                                                  |
- * | `EVENT_TYPING`                   | `sessionId`, `typing`                                                   |
+ * | `EVENT_TYPING`                   | `sessionId`, `typing`, `messageJson` (`TypingState` JSON)                |
  * | `EVENT_CONNECTED`                | `sessionId`                                                             |
  * | `EVENT_RECONNECTING`             | `sessionId`, `reconnectAttempt`, `disconnectReasonKind` (+ server* if SERVER_CLOSED) |
  * | `EVENT_RECONNECTED`              | `sessionId`                                                             |
@@ -39,7 +39,7 @@ internal class SessionEvent {
     /** EVENT_CONTROL_UPDATED — `SessionBridge.CONTROL_AI` or `CONTROL_USER`. */
     @JvmField var control: Int = 0
 
-    /** EVENT_TYPING — true when remote started typing, false when stopped. */
+    /** EVENT_TYPING — aggregate compatibility bit; authoritative identity is in messageJson. */
     @JvmField var typing: Boolean = false
 
     /** EVENT_RECONNECTING — 1-indexed attempt counter. */
@@ -66,7 +66,7 @@ internal class SessionEvent {
     /** EVENT_CALL_ERROR — true = error present, false = error cleared. */
     @JvmField var callErrorPresent: Boolean = false
 
-    /** EVENT_MESSAGE_ADDED / EVENT_MESSAGE_UPDATED — `Message` payload as JSON. */
+    /** Message events, EVENT_TYPING, and EVENT_CHAT_SESSION_ENDED variant JSON. */
     @JvmField var messageJson: String? = null
 
     /** EVENT_MESSAGE_UPDATED — row lookup id (= provisional `localId` for outbound ack/failure, or `message.id` for server-driven updates). */

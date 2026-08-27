@@ -2,7 +2,18 @@ package ai.origon.sdk
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.descriptors.buildClassSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonEncoder
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 // ── Enums ────────────────────────────────────────────────────────────
 
@@ -68,6 +79,76 @@ enum class MessageStatus {
 enum class MessageState {
     @SerialName("streaming") STREAMING,
     @SerialName("completed") COMPLETED,
+}
+
+/** Closed delivery-audience vocabulary. The field holding it may be absent. */
+@Serializable
+enum class MessageAudience {
+    /** Visible only to attached internal agents and supervisors. */
+    @SerialName("internal") INTERNAL,
+    /** Visible to internal participants and the external visitor. */
+    @SerialName("all") ALL,
+}
+
+/** Server-stamped identity for one active remote typer. Ephemeral: do not persist or log. */
+@Serializable
+data class TypingParticipant(
+    val participantId: String,
+    val role: MessageRole,
+    val userId: String? = null,
+    val userName: String? = null,
+    val audience: MessageAudience,
+)
+
+/** Stable first-activation-ordered snapshot of active remote typers. */
+@Serializable
+data class TypingState(
+    val participants: List<TypingParticipant> = emptyList(),
+)
+
+/** Optional message metadata with strict lowercase wire values. */
+@Serializable(with = MessageMetadataSerializer::class)
+data class MessageMetadata(
+    val audience: MessageAudience? = null,
+)
+
+internal object MessageMetadataSerializer : KSerializer<MessageMetadata> {
+    override val descriptor = buildClassSerialDescriptor("ai.origon.sdk.MessageMetadata")
+
+    override fun deserialize(decoder: Decoder): MessageMetadata {
+        val input = decoder as? JsonDecoder
+            ?: throw SerializationException("MessageMetadata supports JSON only")
+        val value = input.decodeJsonElement()
+        val objectValue = value as? JsonObject
+            ?: throw SerializationException("message metadata must be an object")
+        val audienceValue = objectValue["audience"]
+        if (audienceValue == null || audienceValue is JsonNull) return MessageMetadata()
+        val raw = (audienceValue as? JsonPrimitive)
+            ?.takeIf { it.isString }
+            ?.content
+            ?: throw SerializationException("message metadata audience must be a string")
+        return MessageMetadata(
+            audience = when (raw) {
+                "" -> null
+                "all" -> MessageAudience.ALL
+                "internal" -> MessageAudience.INTERNAL
+                else -> throw SerializationException("unknown message audience: $raw")
+            },
+        )
+    }
+
+    override fun serialize(encoder: Encoder, value: MessageMetadata) {
+        val output = encoder as? JsonEncoder
+            ?: throw SerializationException("MessageMetadata supports JSON only")
+        output.encodeJsonElement(buildJsonObject {
+            value.audience?.let {
+                put(
+                    "audience",
+                    JsonPrimitive(if (it == MessageAudience.ALL) "all" else "internal"),
+                )
+            }
+        })
+    }
 }
 
 /**
@@ -373,6 +454,7 @@ data class Message(
     val errorText: String? = null,
     val status: MessageStatus = MessageStatus.DELIVERED,
     val state: MessageState = MessageState.COMPLETED,
+    val metadata: MessageMetadata? = null,
 )
 
 /** Payload for [OrigonClient.sendMessage]. Mirrors the Rust `SendMessagePayload` shape. */
@@ -398,6 +480,8 @@ data class SendMessagePayload(
      * sharing a button value. Leave null for a plain button reply.
      */
     val galleryLabel: String? = null,
+    /** Optional participant/monitor audience metadata. */
+    val metadata: MessageMetadata? = null,
 )
 
 @Serializable
@@ -607,7 +691,7 @@ sealed class ClientEvent {
 
     data class Typing(
         override val sessionId: String,
-        val isTyping: Boolean,
+        val state: TypingState,
     ) : ClientEvent()
 
     /**

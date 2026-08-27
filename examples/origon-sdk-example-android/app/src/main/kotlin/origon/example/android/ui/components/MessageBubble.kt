@@ -5,6 +5,7 @@ import ai.origon.sdk.Message
 import ai.origon.sdk.MessageButton
 import ai.origon.sdk.MessageRole
 import ai.origon.sdk.MessageStatus
+import ai.origon.sdk.TypingParticipant
 import android.content.Intent
 import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
@@ -31,7 +32,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,6 +50,8 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -83,8 +89,10 @@ import kotlin.math.min
  * to the screen, so this component exposes the affordances and owns neither.
  */
 @Composable
-fun MessageBubble(
+internal fun MessageBubble(
     message: Message,
+    author: ExampleMessageAuthor = exampleMessageAuthor(message),
+    showsAuthor: Boolean = true,
     revealed: Boolean,
     onToggleRevealed: () -> Unit,
     onAttachmentTap: (Int) -> Unit,
@@ -103,6 +111,8 @@ fun MessageBubble(
     } else {
         BubbleBody(
             message = message,
+            author = author,
+            showsAuthor = showsAuthor,
             revealed = revealed,
             onToggleRevealed = onToggleRevealed,
             onAttachmentTap = onAttachmentTap,
@@ -149,6 +159,8 @@ private fun DividerLine(modifier: Modifier = Modifier) {
 @Composable
 private fun BubbleBody(
     message: Message,
+    author: ExampleMessageAuthor,
+    showsAuthor: Boolean,
     revealed: Boolean,
     onToggleRevealed: () -> Unit,
     onAttachmentTap: (Int) -> Unit,
@@ -160,8 +172,12 @@ private fun BubbleBody(
 ) {
     val context = LocalContext.current
     val isSelfUser = message.role == MessageRole.EXTERNAL
-    val text = message.text
-    val hasText = !text.isNullOrEmpty()
+    val hasText = !message.text.isNullOrEmpty() || !message.html.isNullOrEmpty()
+    val rich by produceState<List<ExampleRichBlock>>(
+        initialValue = emptyList(), message.html, message.text,
+    ) {
+        value = ExampleRichText.parse(message.html, message.text).blocks
+    }
     val interaction = remember { MutableInteractionSource() }
 
     // iOS `Spacer(minLength: 60)` on the far side. SwiftUI's Spacer expands
@@ -184,9 +200,19 @@ private fun BubbleBody(
                 onClick = onToggleRevealed,
             ),
         ) {
-            if (hasText) {
+            if (showsAuthor) {
                 Text(
-                    text.orEmpty(),
+                    author.displayName,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = OrigonTheme.colors.textSecondary,
+                    modifier = Modifier
+                        .padding(bottom = 4.dp)
+                        .semantics { contentDescription = "Message from ${author.displayName}" },
+                )
+            }
+            if (hasText) {
+                ExampleRichMessageText(
+                    blocks = rich,
                     style = MaterialTheme.typography.bodyLarge,
                     color = if (isSelfUser) {
                         MaterialTheme.colorScheme.onPrimary
@@ -208,17 +234,15 @@ private fun BubbleBody(
             }
 
             message.attachments.forEachIndexed { index, attachment ->
-                AttachmentRow(
-                    attachment = attachment,
-                    isSelfUser = isSelfUser,
-                    onTap = { onAttachmentTap(index) },
-                    onDownload = { onDownloadAttachment(attachment) },
-                    // iOS VStack spacing 6; the first row sits flush when no
-                    // text bubble precedes it.
-                    modifier = Modifier.padding(
-                        top = if (index == 0 && !hasText) 0.dp else 6.dp,
-                    ),
-                )
+                key(attachment.id.ifBlank { "attachment-$index" }) {
+                    AttachmentRow(
+                        attachment = attachment,
+                        isSelfUser = isSelfUser,
+                        onTap = { onAttachmentTap(index) },
+                        onDownload = { onDownloadAttachment(attachment) },
+                        modifier = Modifier.padding(top = if (index == 0 && !hasText) 0.dp else 6.dp),
+                    )
+                }
             }
 
             // Interactive prompt options, below the text bubble. A prompt rides
@@ -233,10 +257,11 @@ private fun BubbleBody(
                         // walk that option's edge, otherwise tapping a link
                         // would strand the conversation on a waiter that never
                         // resolves.
-                        if (button.buttonType == "url" && button.value.isNotEmpty()) {
+                        val safeUrl = examplePromptUrl(button.buttonType, button.value)
+                        if (safeUrl != null) {
                             runCatching {
                                 context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, button.value.toUri()),
+                                    Intent(Intent.ACTION_VIEW, safeUrl.toUri()),
                                 )
                             }.onFailure { Log.w(TAG, "couldn't open ${button.value}: $it") }
                         }
@@ -296,6 +321,44 @@ private fun BubbleBody(
             }
         }
     }
+}
+
+internal fun examplePromptUrl(buttonType: String?, value: String): String? =
+    if (buttonType == "url") ExampleRichText.safeHttpUrl(value) else null
+
+internal data class ExampleMessageAuthor(val key: String, val displayName: String)
+
+internal fun exampleMessageAuthor(message: Message): ExampleMessageAuthor = when (message.role) {
+    MessageRole.EXTERNAL -> ExampleMessageAuthor("self", message.userName?.trim()?.takeIf(String::isNotEmpty) ?: "You")
+    MessageRole.USER -> {
+        val name = message.userName?.trim()?.takeIf(String::isNotEmpty)
+        val identity = message.userId?.trim()?.takeIf(String::isNotEmpty) ?: name ?: "agent"
+        ExampleMessageAuthor("agent:${identity.lowercase()}", name ?: "Agent")
+    }
+    MessageRole.AI, MessageRole.SYSTEM -> ExampleMessageAuthor("assistant", "Assistant")
+}
+
+internal fun exampleTypingAuthor(participant: TypingParticipant?): ExampleMessageAuthor =
+    when (participant?.role) {
+        MessageRole.AI, MessageRole.SYSTEM, null -> ExampleMessageAuthor("assistant", "Assistant")
+        MessageRole.EXTERNAL -> {
+            val name = participant.userName?.trim()?.takeIf(String::isNotEmpty)
+            val identity = participant.userId?.trim()?.takeIf(String::isNotEmpty)
+                ?: name ?: participant.participantId
+            ExampleMessageAuthor("external:${identity.lowercase()}", name ?: "Visitor")
+        }
+        MessageRole.USER -> {
+            val name = participant.userName?.trim()?.takeIf(String::isNotEmpty)
+            val identity = participant.userId?.trim()?.takeIf(String::isNotEmpty)
+                ?: name ?: participant.participantId
+            ExampleMessageAuthor("agent:${identity.lowercase()}", name ?: "Agent")
+        }
+    }
+
+internal fun exampleShouldShowAuthor(message: Message, previous: Message?): Boolean {
+    if (!message.action.isNullOrEmpty()) return false
+    if (previous == null || !previous.action.isNullOrEmpty()) return true
+    return exampleMessageAuthor(message).key != exampleMessageAuthor(previous).key
 }
 
 // ── Attachment row ───────────────────────────────────────────────────────
