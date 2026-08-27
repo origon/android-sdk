@@ -268,6 +268,9 @@ abandon focus and remove the foreground notification. See the example's
 // Mute (per session).
 client.setMute(id = response.sessionId, muted = true)
 
+// Send one DTMF digit to the active CX flow. Valid symbols are 0-9, *, #, A-D.
+client.sendDtmf(id = response.sessionId, digit = '5')
+
 // Audio output route — process-global, so no session id. Applied via
 // AudioManager (speakerphone / Bluetooth SCO). Resets to AUTOMATIC on each
 // new call.
@@ -536,6 +539,7 @@ requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, a
 | `openChat(sessionId, intent)` | Open one retained chat with `PASSIVE`, `EXPLICIT_NAVIGATION`, or `NOTIFICATION` authority. |
 | `joinCall(input)` / `joinChat(input)` | Attach to a previously-obtained `StartSessionResponse`. |
 | `endSession(id)` / `endAllSessions()` | Close a single / every session. |
+| `sendDtmf(id, digit)` | Voice — send one uppercase ASCII `0-9`, `*`, `#`, or `A-D` control symbol to the CX flow. Produces no local tone or haptic. |
 | `setMute(id, muted)` / `setMuteAll(muted)` | Voice — absolute mute. |
 | `setAudioOutput(route)` | Voice — override the audio output route (`SPEAKER` / `AUTOMATIC` / `BLUETOOTH`). Process-global. |
 | `sendMessage(id, payload)` | Chat — POST `<sessionUrl>/message`. Returns the server-issued `Message`. Fires `MessageAdded` then `MessageUpdated`. |

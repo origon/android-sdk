@@ -3,6 +3,7 @@ package ai.origon.sdk
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -13,6 +14,26 @@ import kotlinx.serialization.json.jsonObject
 
 class MobileContinuityTest {
     private val json = Json { ignoreUnknownKeys = true }
+
+    @Test
+    fun dtmfValidationAcceptsExactlyThePublicAlphabet() {
+        for (digit in "0123456789*#ABCD") {
+            assertEquals(digit, OrigonClient.validateDtmfDigit(digit))
+        }
+    }
+
+    @Test
+    fun dtmfValidationRejectsLowercaseAndNonAsciiWithConstantError() {
+        for (digit in listOf('a', 'd', 'é', '１', '\uD83D')) {
+            val error = assertFailsWith<IllegalArgumentException> {
+                OrigonClient.validateDtmfDigit(digit)
+            }
+            assertEquals(
+                "DTMF digit must be one uppercase ASCII symbol",
+                error.message,
+            )
+        }
+    }
 
     @Test
     fun durableCachePolicyDefaultsOnAndCanBeDisabled() {

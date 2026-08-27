@@ -194,6 +194,7 @@ internal object SessionBridge {
     // ── Voice controls ───────────────────────────────────────────────
 
     @JvmStatic external fun setMute(handle: Long, id: String, muted: Boolean)
+    @JvmStatic external fun sendDtmf(handle: Long, id: String, digit: Char)
     @JvmStatic external fun setMuteAll(handle: Long, muted: Boolean)
 
     /** Override the audio output route. [route] is one of `AUDIO_OUTPUT_*`. */
