@@ -133,6 +133,25 @@ auto-return to a recent chat. Those are host-product lifecycle choices. Apps
 that want passive retained-chat restore can follow the main README while
 keeping explicit row and notification navigation on their named intents.
 
+## Session audio levels
+
+Numeric levels are an opt-in callback and are not wired into this example's UI.
+A host can keep the returned token beside its active call and close it with the
+call lifecycle:
+
+```kotlin
+val levels = client.observeAudioLevels(sessionId) { snapshot ->
+    // Main looper. Render snapshot.outbound / inbound / endpoints.
+}
+
+// Idempotent; client.close() also cancels every live observation.
+levels.close()
+```
+
+The callback is one combined immutable session snapshot. It is not a `Flow`,
+does not carry participant identity or VAD state, and user code may safely call
+either `levels.cancel()` or `client.close()` from inside the callback.
+
 ## Permissions
 
 - **Microphone** (`RECORD_AUDIO`) — voice calls. Requested at call time; the

@@ -271,6 +271,14 @@ client.setMute(id = response.sessionId, muted = true)
 // Send one DTMF digit to the active CX flow. Valid symbols are 0-9, *, #, A-D.
 client.sendDtmf(id = response.sessionId, digit = '5')
 
+// Observe aggregate local/remote RMS plus endpoint-attributed inbound levels.
+// Retain and close the token with the call UI; callbacks run on the main looper.
+val levelObservation = client.observeAudioLevels(response.sessionId) { levels ->
+    val displayLevel = (maxOf(levels.outbound, levels.inbound) * 4f).coerceIn(0f, 1f)
+    renderSpeakingWave(displayLevel)
+}
+// Later: levelObservation.close()
+
 // Audio output route — process-global, so no session id. Applied via
 // AudioManager (speakerphone / Bluetooth SCO). Resets to AUTOMATIC on each
 // new call.
@@ -540,6 +548,7 @@ requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, a
 | `joinCall(input)` / `joinChat(input)` | Attach to a previously-obtained `StartSessionResponse`. |
 | `endSession(id)` / `endAllSessions()` | Close a single / every session. |
 | `sendDtmf(id, digit)` | Voice — send one uppercase ASCII `0-9`, `*`, `#`, or `A-D` control symbol to the CX flow. Produces no local tone or haptic. |
+| `observeAudioLevels(sessionId, observer)` | Voice — cancellable main-looper callback carrying aggregate outbound/inbound RMS and endpoint-attributed inbound levels. Retain the returned `AudioLevelObservation`. |
 | `setMute(id, muted)` / `setMuteAll(muted)` | Voice — absolute mute. |
 | `setAudioOutput(route)` | Voice — override the audio output route (`SPEAKER` / `AUTOMATIC` / `BLUETOOTH`). Process-global. |
 | `sendMessage(id, payload)` | Chat — POST `<sessionUrl>/message`. Returns the server-issued `Message`. Fires `MessageAdded` then `MessageUpdated`. |

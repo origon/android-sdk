@@ -48,6 +48,11 @@ class OrigonClient(
         cacheDir = cacheRoot?.absolutePath,
     )
     private val nativeGate = NativeHandleGate(rawHandle)
+    private val audioLevelObservations = AudioLevelObservationRegistry()
+    private val audioLevelMainDispatcher by lazy {
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        AudioLevelMainDispatcher { block -> handler.post { block() } }
+    }
 
     init {
         // SessionBridge.initialize throws SessionException on failure;
@@ -69,6 +74,7 @@ class OrigonClient(
         nativeGate.closeOnce(
             beforeDestroy = {
                 PushRegistrar.detach(this)
+                audioLevelObservations.cancelAllAndClose()
             },
             destroy = SessionBridge::destroy,
         )
@@ -395,6 +401,36 @@ class OrigonClient(
 
     fun setMuteAll(muted: Boolean) {
         withHandle { SessionBridge.setMuteAll(it, muted) }
+    }
+
+    /**
+     * Observe combined outbound, aggregate inbound, and endpoint-attributed
+     * inbound levels for one active voice session.
+     *
+     * Creation failures throw synchronously. Updates are pulled on a dedicated
+     * background thread and delivered on the main looper. The returned token is
+     * idempotent; cancelling it or closing this client invalidates queued
+     * callbacks immediately without joining the pump on the main looper.
+     */
+    @Throws(SessionException::class)
+    fun observeAudioLevels(
+        sessionId: String,
+        observer: (SessionAudioLevels) -> Unit,
+    ): AudioLevelObservation = withHandle { handle ->
+        val subscription = SessionBridge.subscribeAudioLevels(handle, sessionId)
+        if (subscription == 0L) {
+            throw SessionException(
+                kind = SessionBridge.ERROR_OTHER,
+                statusCode = 0,
+                code = null,
+                message = "session bridge returned null audio level subscription",
+            )
+        }
+        audioLevelObservations.register(
+            owner = NativeAudioLevelOwner(subscription),
+            dispatcher = audioLevelMainDispatcher,
+            observer = observer,
+        )
     }
 
     /**

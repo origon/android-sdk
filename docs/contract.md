@@ -132,6 +132,33 @@ registers cross-repository contracts that must change and validate together.
   native errors echo the symbol, and a failed request is never retried by the
   wrapper.
 
+## Session audio levels
+
+- The ABI-locked JNI surface adds `subscribeAudioLevels`, `nextAudioLevels`,
+  `cancelAudioLevels`, and `freeAudioLevels` with descriptors
+  `(JLjava/lang/String;)J`,
+  `(J)Lai/origon/sdk/bridge/AudioLevelsNextBridge;`, `(J)V`, and `(J)V`.
+  `AudioLevelsNextBridge` uses `1=UPDATE`, `2=END`, and `3=CANCELLED`; its
+  optional snapshot contains one logical session's finite linear RMS outbound,
+  aggregate inbound, and endpoint-attributed inbound values. Constructor names
+  and descriptors are owned in lockstep with
+  `/home/yl/workspace/apps/sdk/session/src/jni_bridge.rs` and are retained by
+  the AAR consumer rules.
+- Public immutable `EndpointAudioLevel` and `SessionAudioLevels` values are
+  delivered by `OrigonClient.observeAudioLevels(sessionId, observer)` through
+  one combined callback on Android's main looper. The call throws
+  `SessionException` synchronously for creation/invalid-session failures. A
+  post-start metering failure is advisory: consumers receive one terminal zero
+  snapshot and then the observation ends; no error enters the callback.
+- Each `AudioLevelObservation` owns a background blocking-next pump and is an
+  idempotent `AutoCloseable` cancellation token. The pump alone frees the native
+  observation. Main-looper delivery acknowledges acceptance before user code;
+  every queued callback rechecks its token/client generation. Token cancel and
+  client close synchronously invalidate and signal native cancellation, but
+  never join or free on the main looper, so either operation is safe reentrantly
+  from ordinary and terminal-zero callbacks. No Flow/coroutine adapter,
+  participant identity, VAD, or Android UI is part of v1.
+
 ## Release gate
 
 The release AAR must contain arm64-v8a, armeabi-v7a, and x86_64 libraries. AGP

@@ -1,6 +1,7 @@
 package ai.origon.sdk
 
 import ai.origon.sdk.bridge.AttachmentPolicy
+import ai.origon.sdk.bridge.AudioLevelsNextBridge
 import ai.origon.sdk.bridge.SessionEvent
 import ai.origon.sdk.bridge.SessionLoaderResult
 import ai.origon.sdk.bridge.StartSessionResponse
@@ -197,6 +198,11 @@ internal object SessionBridge {
     @JvmStatic external fun sendDtmf(handle: Long, id: String, digit: Char)
     @JvmStatic external fun setMuteAll(handle: Long, muted: Boolean)
 
+    @JvmStatic external fun subscribeAudioLevels(handle: Long, sessionId: String): Long
+    @JvmStatic external fun nextAudioLevels(subscription: Long): AudioLevelsNextBridge
+    @JvmStatic external fun cancelAudioLevels(subscription: Long)
+    @JvmStatic external fun freeAudioLevels(subscription: Long)
+
     /** Override the audio output route. [route] is one of `AUDIO_OUTPUT_*`. */
     @JvmStatic external fun setAudioOutput(handle: Long, route: Int)
 
@@ -315,6 +321,9 @@ internal object SessionBridge {
     const val LOADER_END = 2
     const val LOADER_ERROR = 3
     const val LOADER_CANCELLED = 4
+    const val AUDIO_LEVELS_UPDATE = 1
+    const val AUDIO_LEVELS_END = 2
+    const val AUDIO_LEVELS_CANCELLED = 3
     const val CHAT_ACCESS_PASSIVE = 0
     const val CHAT_ACCESS_EXPLICIT_NAVIGATION = 1
     const val CHAT_ACCESS_NOTIFICATION = 2

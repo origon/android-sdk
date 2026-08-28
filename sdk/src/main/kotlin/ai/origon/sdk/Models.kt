@@ -181,6 +181,20 @@ enum class AudioOutputRoute {
     }
 }
 
+/** One endpoint-attributed inbound level in a logical voice-session snapshot. */
+data class EndpointAudioLevel(
+    val endpointId: String,
+    val inbound: Float,
+)
+
+/** Latest finite linear RMS levels for one logical voice session. */
+data class SessionAudioLevels(
+    val sessionId: String,
+    val outbound: Float,
+    val inbound: Float,
+    val endpoints: List<EndpointAudioLevel>,
+)
+
 // ── Configuration / requests ─────────────────────────────────────────
 
 data class ClientConfig(
