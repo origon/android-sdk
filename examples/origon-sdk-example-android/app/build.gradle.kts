@@ -7,7 +7,7 @@ plugins {
 }
 
 val origonSdkVersion = providers.gradleProperty("origonSdkVersion")
-    .getOrElse("0.3.3")
+    .getOrElse("0.3.4")
     .trim()
 require(origonSdkVersion.isNotEmpty() && !origonSdkVersion.any(Char::isWhitespace)) {
     "origonSdkVersion must be one exact, nonblank Maven version"
