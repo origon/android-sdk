@@ -46,6 +46,26 @@ registers cross-repository contracts that must change and validate together.
 
 ## Mobile chat continuity and push
 
+### Cache-first endpoint configuration
+
+- `OrigonClient(Context, ClientConfig)` preserves its JVM/API shape. An exact,
+  protected cached config lets construction return with non-authoritative
+  presentation while Rust owns one background refresh; a cache miss preserves
+  blocking network initialization.
+- `serverConfig` decodes one atomic JSON generation. `serverConfigUpdates()`
+  and `retryServerConfig()` expose bounded two-item `Flow`s over the native
+  loader lifecycle. Flow cancellation cancels/joins/frees only observation;
+  `close()` also cancels the internal authority collector and native destroy
+  joins the mandatory refresh. Convenience properties read the same snapshot.
+- Cached config, directory, and transcript state is view-only. The example
+  gates start/open/restore/send/typing/upload/server-delete and FCM registration
+  until an authoritative update, retains view-only state plus retry for
+  transient/5xx failure, and synchronously purges exact-scope in-memory state
+  for 400/401/403/config-404 before recovery/logout.
+- FCM tokens remain buffered until authoritative config. Client close detaches
+  and fences pending registration; generation-bound unregister and authority
+  clearing remain admitted cleanup.
+
 - The wrapper supplies JNI `initialize` with a canonical lowercase UUIDv4 generated
   by the platform CSPRNG and persisted as a confidential bearer capability under
   Android's no-backup storage. It never derives continuity identity from

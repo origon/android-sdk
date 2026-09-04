@@ -78,6 +78,7 @@ internal object SessionBridge {
 
     // ── Local getters (read from cached /config body) ────────────────
 
+    @JvmStatic external fun serverConfig(handle: Long): String
     @JvmStatic external fun getStartMessage(handle: Long): String
     @JvmStatic external fun isMultipleChannelsAllowed(handle: Long): Boolean
     @JvmStatic external fun isChatEnabled(handle: Long): Boolean
@@ -86,6 +87,8 @@ internal object SessionBridge {
 
     // ── Finite cache/network loaders ─────────────────────────────────
 
+    @JvmStatic external fun configLoaderStart(handle: Long): Long
+    @JvmStatic external fun configRetry(handle: Long): Long
     @JvmStatic external fun sessionLoaderStart(handle: Long, id: String, policy: Int): Long
     @JvmStatic external fun directoryLoaderStart(handle: Long, policy: Int): Long
     @JvmStatic external fun loaderNext(loader: Long): SessionLoaderResult

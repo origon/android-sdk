@@ -59,6 +59,7 @@ class CallService(private val manager: SDKManager) {
      * session id.
      */
     suspend fun startCall() {
+        check(manager.hasAuthoritativeConfig) { "Endpoint configuration is still refreshing" }
         val client = manager.client
             ?: throw IllegalStateException("SDK not initialized")
 

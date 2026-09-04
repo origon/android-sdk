@@ -98,6 +98,7 @@ permission, foreground-promotion, audio-focus, and native-start ordering.
 
 ```kotlin
 import ai.origon.sdk.*
+import kotlinx.coroutines.flow.first
 
 // Optional: install Rust-side logging once at app launch.
 OrigonClient.initLogging()
@@ -111,6 +112,13 @@ val client = OrigonClient(
     context,
     ClientConfig(endpoint = "https://origon.ai/chat/api/<id>"),
 )
+
+// Paint an exact cached config immediately when present, but wait for the
+// authoritative network generation before exposing state-changing actions.
+client.serverConfigUpdates().first { update ->
+    if (update is ServerConfigLoadUpdate.Snapshot) render(update.value.config)
+    update is ServerConfigLoadUpdate.Snapshot && update.value.authoritative
+}
 
 // Start a voice session.
 val response = client.startCall(StartCallOptions())
