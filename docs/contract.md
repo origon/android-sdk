@@ -57,6 +57,9 @@ registers cross-repository contracts that must change and validate together.
   loader lifecycle. Flow cancellation cancels/joins/frees only observation;
   `close()` also cancels the internal authority collector and native destroy
   joins the mandatory refresh. Convenience properties read the same snapshot.
+- The five legacy scalar JNI config methods and their bridge-only attachment
+  policy model are removed. Public convenience properties remain source-compatible
+  and derive exclusively from the atomic `serverConfig` snapshot.
 - Cached config, directory, and transcript state is view-only. The example
   gates start/open/restore/send/typing/upload/server-delete and FCM registration
   until an authoritative update, retains view-only state plus retry for
