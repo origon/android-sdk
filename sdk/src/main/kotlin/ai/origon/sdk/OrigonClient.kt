@@ -2,11 +2,16 @@ package ai.origon.sdk
 
 import ai.origon.sdk.bridge.SessionEvent
 import java.util.UUID
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -48,6 +53,13 @@ class OrigonClient(
         cacheDir = cacheRoot?.absolutePath,
     )
     private val nativeGate = NativeHandleGate(rawHandle)
+    private val audioLevelObservations = AudioLevelObservationRegistry()
+    private val configAuthorityScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var configAuthorityJob: Job? = null
+    private val audioLevelMainDispatcher by lazy {
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        AudioLevelMainDispatcher { block -> handler.post { block() } }
+    }
 
     init {
         // SessionBridge.initialize throws SessionException on failure;
@@ -60,15 +72,23 @@ class OrigonClient(
                 message = "session bridge returned null handle",
             )
         }
-        // Become the active client for push registration and flush any
-        // token buffered before this client existed. See Push.kt.
-        PushRegistrar.attach(this)
+        configAuthorityJob = configAuthorityScope.launch {
+            val authoritative = runCatching {
+                serverConfigUpdates().first { update ->
+                    update is ServerConfigLoadUpdate.Snapshot && update.value.authoritative
+                }
+            }.getOrNull()
+            if (authoritative != null) PushRegistrar.attach(this@OrigonClient)
+        }
     }
 
     override fun close() {
         nativeGate.closeOnce(
             beforeDestroy = {
+                configAuthorityJob?.cancel()
+                configAuthorityScope.cancel()
                 PushRegistrar.detach(this)
+                audioLevelObservations.cancelAllAndClose()
             },
             destroy = SessionBridge::destroy,
         )
@@ -78,39 +98,57 @@ class OrigonClient(
 
     // ── Cached /config getters ───────────────────────────────────────
 
+    val serverConfig: ServerConfig
+        get() = runCatching {
+            withHandle { handle ->
+                JSON.decodeFromString(ServerConfig.serializer(), SessionBridge.serverConfig(handle))
+            }
+        }.getOrDefault(ServerConfig.DISABLED)
+
     /** Pre-populated first assistant message configured for the tenant. */
     val startMessage: String
-        get() = withHandle(SessionBridge::getStartMessage)
+        get() = serverConfig.startMessage
 
     val isChatEnabled: Boolean
-        get() = withHandle(SessionBridge::isChatEnabled)
+        get() = serverConfig.isChatEnabled
 
     val isCallEnabled: Boolean
-        get() = withHandle(SessionBridge::isCallEnabled)
+        get() = serverConfig.isCallEnabled
 
     /** True when chat and voice may share one session. */
     val multipleChannels: Boolean
-        get() = withHandle(SessionBridge::isMultipleChannelsAllowed)
+        get() = serverConfig.multipleChannels
 
     val attachmentPolicy: AttachmentPolicy
-        get() = withHandle { handle ->
-            val raw = SessionBridge.getAttachmentPolicy(handle)
-            AttachmentPolicy(
-                images = AttachmentRule(raw.images.enabled, raw.images.maxSize),
-                documents = AttachmentRule(raw.documents.enabled, raw.documents.maxSize),
-                videos = AttachmentRule(raw.videos.enabled, raw.videos.maxSize),
-                audio = AttachmentRule(raw.audio.enabled, raw.audio.maxSize),
-            )
-        }
+        get() = serverConfig.attachmentPolicy
 
-    val serverConfig: ServerConfig
-        get() = ServerConfig(
-            startMessage = startMessage,
-            multipleChannels = multipleChannels,
-            isChatEnabled = isChatEnabled,
-            isCallEnabled = isCallEnabled,
-            attachmentPolicy = attachmentPolicy,
-        )
+    fun serverConfigUpdates(): Flow<ServerConfigLoadUpdate> = configLoaderFlow(retry = false)
+
+    fun retryServerConfig(): Flow<ServerConfigLoadUpdate> = configLoaderFlow(retry = true)
+
+    private fun configLoaderFlow(retry: Boolean): Flow<ServerConfigLoadUpdate> = loaderFlow(
+        start = { handle ->
+            if (retry) SessionBridge.configRetry(handle)
+            else SessionBridge.configLoaderStart(handle)
+        },
+        decode = { result ->
+            when (result.status) {
+                SessionBridge.LOADER_UPDATE -> ServerConfigLoadUpdate.Snapshot(
+                    JSON.decodeFromString(
+                        ServerConfigLoadSnapshot.serializer(),
+                        result.payloadJson.orEmpty(),
+                    ),
+                ).also { update ->
+                    if (update.value.authoritative) PushRegistrar.attach(this)
+                }
+                SessionBridge.LOADER_ERROR -> ServerConfigLoadUpdate.RefreshFailed(
+                    result.toSessionException(),
+                    result.cachedSnapshotEmitted,
+                )
+                else -> null
+            }
+        },
+    )
 
     /**
      * Replace session-level attributes injected as `data.attributes` on
@@ -395,6 +433,36 @@ class OrigonClient(
 
     fun setMuteAll(muted: Boolean) {
         withHandle { SessionBridge.setMuteAll(it, muted) }
+    }
+
+    /**
+     * Observe combined outbound, aggregate inbound, and endpoint-attributed
+     * inbound levels for one active voice session.
+     *
+     * Creation failures throw synchronously. Updates are pulled on a dedicated
+     * background thread and delivered on the main looper. The returned token is
+     * idempotent; cancelling it or closing this client invalidates queued
+     * callbacks immediately without joining the pump on the main looper.
+     */
+    @Throws(SessionException::class)
+    fun observeAudioLevels(
+        sessionId: String,
+        observer: (SessionAudioLevels) -> Unit,
+    ): AudioLevelObservation = withHandle { handle ->
+        val subscription = SessionBridge.subscribeAudioLevels(handle, sessionId)
+        if (subscription == 0L) {
+            throw SessionException(
+                kind = SessionBridge.ERROR_OTHER,
+                statusCode = 0,
+                code = null,
+                message = "session bridge returned null audio level subscription",
+            )
+        }
+        audioLevelObservations.register(
+            owner = NativeAudioLevelOwner(subscription),
+            dispatcher = audioLevelMainDispatcher,
+            observer = observer,
+        )
     }
 
     /**

@@ -506,6 +506,7 @@ class ChatService internal constructor(
 
     /** Notify the peer the user is typing. Cheap to call; SDK debounces. */
     fun notifyTyping() {
+        if (!endpointPolicy().chatEnabled) return
         val client = sdkClient() ?: return
         val id = _currentSessionId.value ?: return
         runCatching { client.notifyTyping(id) }

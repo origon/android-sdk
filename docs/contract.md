@@ -46,6 +46,29 @@ registers cross-repository contracts that must change and validate together.
 
 ## Mobile chat continuity and push
 
+### Cache-first endpoint configuration
+
+- `OrigonClient(Context, ClientConfig)` preserves its JVM/API shape. An exact,
+  protected cached config lets construction return with non-authoritative
+  presentation while Rust owns one background refresh; a cache miss preserves
+  blocking network initialization.
+- `serverConfig` decodes one atomic JSON generation. `serverConfigUpdates()`
+  and `retryServerConfig()` expose bounded two-item `Flow`s over the native
+  loader lifecycle. Flow cancellation cancels/joins/frees only observation;
+  `close()` also cancels the internal authority collector and native destroy
+  joins the mandatory refresh. Convenience properties read the same snapshot.
+- The five legacy scalar JNI config methods and their bridge-only attachment
+  policy model are removed. Public convenience properties remain source-compatible
+  and derive exclusively from the atomic `serverConfig` snapshot.
+- Cached config, directory, and transcript state is view-only. The example
+  gates start/open/restore/send/typing/upload/server-delete and FCM registration
+  until an authoritative update, retains view-only state plus retry for
+  transient/5xx failure, and synchronously purges exact-scope in-memory state
+  for 400/401/403/config-404 before recovery/logout.
+- FCM tokens remain buffered until authoritative config. Client close detaches
+  and fences pending registration; generation-bound unregister and authority
+  clearing remain admitted cleanup.
+
 - The wrapper supplies JNI `initialize` with a canonical lowercase UUIDv4 generated
   by the platform CSPRNG and persisted as a confidential bearer capability under
   Android's no-backup storage. It never derives continuity identity from
@@ -131,6 +154,33 @@ registers cross-repository contracts that must change and validate together.
   uppercase ASCII `0-9*#A-D` before calling JNI. Neither local validation nor
   native errors echo the symbol, and a failed request is never retried by the
   wrapper.
+
+## Session audio levels
+
+- The ABI-locked JNI surface adds `subscribeAudioLevels`, `nextAudioLevels`,
+  `cancelAudioLevels`, and `freeAudioLevels` with descriptors
+  `(JLjava/lang/String;)J`,
+  `(J)Lai/origon/sdk/bridge/AudioLevelsNextBridge;`, `(J)V`, and `(J)V`.
+  `AudioLevelsNextBridge` uses `1=UPDATE`, `2=END`, and `3=CANCELLED`; its
+  optional snapshot contains one logical session's finite linear RMS outbound,
+  aggregate inbound, and endpoint-attributed inbound values. Constructor names
+  and descriptors are owned in lockstep with
+  `/home/yl/workspace/apps/sdk/session/src/jni_bridge.rs` and are retained by
+  the AAR consumer rules.
+- Public immutable `EndpointAudioLevel` and `SessionAudioLevels` values are
+  delivered by `OrigonClient.observeAudioLevels(sessionId, observer)` through
+  one combined callback on Android's main looper. The call throws
+  `SessionException` synchronously for creation/invalid-session failures. A
+  post-start metering failure is advisory: consumers receive one terminal zero
+  snapshot and then the observation ends; no error enters the callback.
+- Each `AudioLevelObservation` owns a background blocking-next pump and is an
+  idempotent `AutoCloseable` cancellation token. The pump alone frees the native
+  observation. Main-looper delivery acknowledges acceptance before user code;
+  every queued callback rechecks its token/client generation. Token cancel and
+  client close synchronously invalidate and signal native cancellation, but
+  never join or free on the main looper, so either operation is safe reentrantly
+  from ordinary and terminal-zero callbacks. No Flow/coroutine adapter,
+  participant identity, VAD, or Android UI is part of v1.
 
 ## Release gate
 

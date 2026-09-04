@@ -77,7 +77,7 @@ In your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("ai.origon:sdk:0.3.2")
+    implementation("ai.origon:sdk:0.3.3")
 }
 ```
 
@@ -98,6 +98,7 @@ permission, foreground-promotion, audio-focus, and native-start ordering.
 
 ```kotlin
 import ai.origon.sdk.*
+import kotlinx.coroutines.flow.first
 
 // Optional: install Rust-side logging once at app launch.
 OrigonClient.initLogging()
@@ -111,6 +112,13 @@ val client = OrigonClient(
     context,
     ClientConfig(endpoint = "https://origon.ai/chat/api/<id>"),
 )
+
+// Paint an exact cached config immediately when present, but wait for the
+// authoritative network generation before exposing state-changing actions.
+client.serverConfigUpdates().first { update ->
+    if (update is ServerConfigLoadUpdate.Snapshot) render(update.value.config)
+    update is ServerConfigLoadUpdate.Snapshot && update.value.authoritative
+}
 
 // Start a voice session.
 val response = client.startCall(StartCallOptions())
@@ -270,6 +278,14 @@ client.setMute(id = response.sessionId, muted = true)
 
 // Send one DTMF digit to the active CX flow. Valid symbols are 0-9, *, #, A-D.
 client.sendDtmf(id = response.sessionId, digit = '5')
+
+// Observe aggregate local/remote RMS plus endpoint-attributed inbound levels.
+// Retain and close the token with the call UI; callbacks run on the main looper.
+val levelObservation = client.observeAudioLevels(response.sessionId) { levels ->
+    val displayLevel = (maxOf(levels.outbound, levels.inbound) * 4f).coerceIn(0f, 1f)
+    renderSpeakingWave(displayLevel)
+}
+// Later: levelObservation.close()
 
 // Audio output route — process-global, so no session id. Applied via
 // AudioManager (speakerphone / Bluetooth SCO). Resets to AUTOMATIC on each
@@ -540,6 +556,7 @@ requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, a
 | `joinCall(input)` / `joinChat(input)` | Attach to a previously-obtained `StartSessionResponse`. |
 | `endSession(id)` / `endAllSessions()` | Close a single / every session. |
 | `sendDtmf(id, digit)` | Voice — send one uppercase ASCII `0-9`, `*`, `#`, or `A-D` control symbol to the CX flow. Produces no local tone or haptic. |
+| `observeAudioLevels(sessionId, observer)` | Voice — cancellable main-looper callback carrying aggregate outbound/inbound RMS and endpoint-attributed inbound levels. Retain the returned `AudioLevelObservation`. |
 | `setMute(id, muted)` / `setMuteAll(muted)` | Voice — absolute mute. |
 | `setAudioOutput(route)` | Voice — override the audio output route (`SPEAKER` / `AUTOMATIC` / `BLUETOOTH`). Process-global. |
 | `sendMessage(id, payload)` | Chat — POST `<sessionUrl>/message`. Returns the server-issued `Message`. Fires `MessageAdded` then `MessageUpdated`. |

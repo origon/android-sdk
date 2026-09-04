@@ -28,6 +28,9 @@
 -keep class ai.origon.sdk.AttachmentPolicy { *; }
 -keep class ai.origon.sdk.AttachmentPolicy$* { *; }
 -keep class ai.origon.sdk.ServerConfig { *; }
+-keep class ai.origon.sdk.EndpointAudioLevel { *; }
+-keep class ai.origon.sdk.SessionAudioLevels { *; }
+-keep class ai.origon.sdk.AudioLevelObservation { *; }
 -keep class ai.origon.sdk.DisconnectReason { *; }
 -keep class ai.origon.sdk.DisconnectReason$* { *; }
 -keep class ai.origon.sdk.ClientEvent { *; }

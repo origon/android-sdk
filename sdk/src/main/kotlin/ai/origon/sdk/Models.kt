@@ -181,6 +181,20 @@ enum class AudioOutputRoute {
     }
 }
 
+/** One endpoint-attributed inbound level in a logical voice-session snapshot. */
+data class EndpointAudioLevel(
+    val endpointId: String,
+    val inbound: Float,
+)
+
+/** Latest finite linear RMS levels for one logical voice session. */
+data class SessionAudioLevels(
+    val sessionId: String,
+    val outbound: Float,
+    val inbound: Float,
+    val endpoints: List<EndpointAudioLevel>,
+)
+
 // ── Configuration / requests ─────────────────────────────────────────
 
 data class ClientConfig(
@@ -286,12 +300,14 @@ data class ActiveSession(
 
 // ── Server config ────────────────────────────────────────────────────
 
+@Serializable
 data class AttachmentRule(
     val enabled: Boolean,
     /** Maximum allowed size in megabytes. */
     val maxSize: Int,
 )
 
+@Serializable
 data class AttachmentPolicy(
     val images: AttachmentRule,
     val documents: AttachmentRule,
@@ -309,13 +325,42 @@ data class AttachmentPolicy(
     }
 }
 
+@Serializable
 data class ServerConfig(
     val startMessage: String,
     val multipleChannels: Boolean,
+    @SerialName("chatEnabled")
     val isChatEnabled: Boolean,
+    @SerialName("callEnabled")
     val isCallEnabled: Boolean,
     val attachmentPolicy: AttachmentPolicy,
+) {
+    companion object {
+        val DISABLED = ServerConfig(
+            startMessage = "",
+            multipleChannels = false,
+            isChatEnabled = false,
+            isCallEnabled = false,
+            attachmentPolicy = AttachmentPolicy.DISABLED,
+        )
+    }
+}
+
+@Serializable
+data class ServerConfigLoadSnapshot(
+    val source: SessionLoadSource,
+    val authoritative: Boolean,
+    val refreshedAt: Long,
+    val config: ServerConfig,
 )
+
+sealed interface ServerConfigLoadUpdate {
+    data class Snapshot(val value: ServerConfigLoadSnapshot) : ServerConfigLoadUpdate
+    data class RefreshFailed(
+        val error: SessionException,
+        val cachedSnapshotEmitted: Boolean,
+    ) : ServerConfigLoadUpdate
+}
 
 // ── Session history ──────────────────────────────────────────────────
 

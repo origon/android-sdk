@@ -78,14 +78,21 @@ data class ExampleEndpointPolicy(
             attachments = ExampleAttachmentPolicy(),
         )
 
-        fun from(config: ExampleServerConfig?): ExampleEndpointPolicy {
+        fun from(
+            config: ExampleServerConfig?,
+            authoritative: Boolean = true,
+        ): ExampleEndpointPolicy {
             if (config == null) return DISABLED
             return ExampleEndpointPolicy(
                 greeting = config.startMessage.trim().ifEmpty { DEFAULT_GREETING },
-                chatEnabled = config.chatEnabled,
-                callEnabled = config.callEnabled,
-                multipleChannels = config.multipleChannels,
-                attachments = if (config.chatEnabled) config.attachments else ExampleAttachmentPolicy(),
+                chatEnabled = authoritative && config.chatEnabled,
+                callEnabled = authoritative && config.callEnabled,
+                multipleChannels = authoritative && config.multipleChannels,
+                attachments = if (authoritative && config.chatEnabled) {
+                    config.attachments
+                } else {
+                    ExampleAttachmentPolicy()
+                },
             )
         }
     }
@@ -94,6 +101,7 @@ data class ExampleEndpointPolicy(
 /** Rejects a late /config result from a client that has already been replaced. */
 class ExampleConfigReplacement {
     private var epoch = 0L
+    val currentEpoch: Long get() = epoch
     var value: ExampleServerConfig? = null
         private set
 
