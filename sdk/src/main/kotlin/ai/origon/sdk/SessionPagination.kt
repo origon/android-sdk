@@ -130,7 +130,7 @@ fun normalizeSessionSearch(value: String): String {
     while (offset < value.length) {
         val codePoint = value.codePointAt(offset)
         offset += Character.charCount(codePoint)
-        if (Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint)) {
+        if (codePoint.isRustWhitespace()) {
             pendingSpace = result.isNotEmpty()
             continue
         }
@@ -143,6 +143,19 @@ fun normalizeSessionSearch(value: String): String {
     }
     return result.toString()
 }
+
+private fun Int.isRustWhitespace(): Boolean =
+    this in 0x0009..0x000d ||
+        this == 0x0020 ||
+        this == 0x0085 ||
+        this == 0x00a0 ||
+        this == 0x1680 ||
+        this in 0x2000..0x200a ||
+        this == 0x2028 ||
+        this == 0x2029 ||
+        this == 0x202f ||
+        this == 0x205f ||
+        this == 0x3000
 
 fun sessionSummaryMatches(summary: SessionSummary, normalizedSearch: String): Boolean {
     fun String?.containsSearch(): Boolean =

@@ -78,6 +78,8 @@ class SessionPaginationTest {
     @Test
     fun searchCorpusAndNormalizationMatchServer() {
         assertEquals("a b", normalizeSessionSearch("  A\u2003\u2003B\u0000  "))
+        assertEquals("ab", normalizeSessionSearch("a\u001c\u001d\u001e\u001fb"))
+        assertEquals("a b", normalizeSessionSearch("a\u0085b"))
         val row = summary(
             id = "session-private",
             updatedAt = "1",
