@@ -88,6 +88,18 @@ internal object SessionBridge {
 
     @JvmStatic external fun sessionLoaderStart(handle: Long, id: String, policy: Int): Long
     @JvmStatic external fun directoryLoaderStart(handle: Long, policy: Int): Long
+    @JvmStatic external fun directoryPageLoaderStart(
+        handle: Long,
+        pageSize: Int,
+        cursor: String?,
+        search: String?,
+    ): Long
+    @JvmStatic external fun sessionHistoryPageLoaderStart(
+        handle: Long,
+        id: String,
+        pageSize: Int,
+        cursor: String?,
+    ): Long
     @JvmStatic external fun loaderNext(loader: Long): SessionLoaderResult
     @JvmStatic external fun loaderCancel(loader: Long)
     @JvmStatic external fun loaderFree(loader: Long)

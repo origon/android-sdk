@@ -558,6 +558,8 @@ requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, a
 | `deleteAttachment(attachmentId)` | `suspend`; cancel an in-flight upload (pass the `uploadId`) or delete a completed attachment (pass `attachment.id`). No session required. |
 | `activeSessions()` | Snapshot of every active session. |
 | `sessionDirectoryUpdates(policy)` | Finite `Flow`: cached directory then authoritative network directory by default. |
+| `sessionDirectoryPageUpdates(request)` | Finite strict directory/search page Flow; defaults to 50 rows (100 maximum) and types initial versus continuation failure. |
+| `sessionHistoryPageUpdates(id, request)` | Finite strict chronological transcript page Flow; defaults to 100 rows (250 maximum), with older continuation pages. |
 | `sessionUpdates(id, policy)` | Finite `Flow`: cached transcript then authoritative network transcript by default. |
 | `cachedSession(s)` / `refreshSession(s)` | Explicit suspend cache-only / network-only reads. |
 | `removeCachedSession` / `clearChatCache` / `pruneChatCache` | Suspend cache maintenance scoped to this client. |
@@ -594,6 +596,7 @@ requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, a
 | `Attachment` | uploaded-media descriptor: `id`, `name`, `contentType`, `url`, and an optional client-side `localUrl` preview (kept on the local `Message`, stripped from the wire). Returned by `uploadAttachment(...)`, carried on `Message.attachments`, and passed back into `SendMessagePayload.attachments`. |
 | `UploadProgress` | `bytesUploaded`, optional `totalBytes`, optional `percent` (both `null` when the transport reports no content length). Passed to the `uploadAttachment` `onProgress` callback. |
 | `SessionSnapshot`, `SessionsSnapshot`, load updates | Cache/network snapshots and typed refresh failures emitted by finite flows. |
+| `SessionDirectoryPager`, `SessionHistoryPager`, page requests/pages/snapshots/load updates | Wrapper-owned query fencing, live reconciliation, stable-ID dedupe, prepend accumulation, cursors, and bounded empty continuation. |
 | `SendMessagePayload` | `text`, `html`, `attachments`, and nullable `metadata` (input shape for `sendMessage(id, payload)`). |
 
 ## License

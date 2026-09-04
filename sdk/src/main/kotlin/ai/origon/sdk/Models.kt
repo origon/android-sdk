@@ -564,6 +564,78 @@ data class SessionsSnapshot(
     val sessions: List<SessionSummary>,
 )
 
+const val SESSION_PAGE_EMPTY_CONTINUATION_LIMIT = 8
+
+enum class SessionPageLoadPhase { INITIAL, CONTINUATION }
+
+data class SessionDirectoryPageRequest(
+    val pageSize: Int = 50,
+    val cursor: String? = null,
+    val search: String? = null,
+) {
+    val phase: SessionPageLoadPhase
+        get() = if (cursor == null) SessionPageLoadPhase.INITIAL else SessionPageLoadPhase.CONTINUATION
+}
+
+data class SessionHistoryPageRequest(
+    val pageSize: Int = 100,
+    val cursor: String? = null,
+) {
+    val phase: SessionPageLoadPhase
+        get() = if (cursor == null) SessionPageLoadPhase.INITIAL else SessionPageLoadPhase.CONTINUATION
+}
+
+@Serializable
+data class SessionDirectoryPage(
+    val sessions: List<SessionSummary>,
+    val nextCursor: String?,
+)
+
+@Serializable
+data class SessionHistoryPage(
+    val history: List<Message>,
+    val control: SessionControl,
+    val nextCursor: String?,
+)
+
+sealed interface SessionDirectoryPageLoadUpdate {
+    data class Page(val value: SessionDirectoryPage) : SessionDirectoryPageLoadUpdate
+    data class Failed(
+        val error: SessionException,
+        val phase: SessionPageLoadPhase,
+    ) : SessionDirectoryPageLoadUpdate
+}
+
+sealed interface SessionHistoryPageLoadUpdate {
+    data class Page(val value: SessionHistoryPage) : SessionHistoryPageLoadUpdate
+    data class Failed(
+        val error: SessionException,
+        val phase: SessionPageLoadPhase,
+    ) : SessionHistoryPageLoadUpdate
+}
+
+data class SessionDirectoryPageSnapshot(
+    val generation: Long,
+    val search: String?,
+    val sessions: List<SessionSummary>,
+    val nextCursor: String?,
+    val emptyContinuations: Int,
+) {
+    val canLoadMore: Boolean
+        get() = nextCursor != null && emptyContinuations < SESSION_PAGE_EMPTY_CONTINUATION_LIMIT
+}
+
+data class SessionHistoryPageSnapshot(
+    val generation: Long,
+    val history: List<Message>,
+    val control: SessionControl,
+    val nextCursor: String?,
+    val emptyContinuations: Int,
+) {
+    val canLoadMore: Boolean
+        get() = nextCursor != null && emptyContinuations < SESSION_PAGE_EMPTY_CONTINUATION_LIMIT
+}
+
 sealed interface SessionLoadUpdate {
     data class Snapshot(val value: SessionSnapshot) : SessionLoadUpdate
     data class RefreshFailed(

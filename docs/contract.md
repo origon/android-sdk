@@ -132,6 +132,23 @@ registers cross-repository contracts that must change and validate together.
   native errors echo the symbol, and a failed request is never retried by the
   wrapper.
 
+## Session directory and transcript pagination
+
+- The wrapper adds only JNI `directoryPageLoaderStart` and
+  `sessionHistoryPageLoaderStart`, retaining every legacy directory/history
+  method and the existing loader next/cancel/free lifecycle.
+- `sessionDirectoryPageUpdates` and `sessionHistoryPageUpdates` are finite
+  one-page Flows. They validate exact envelopes with required nullable cursors
+  and closed `ai|user` control, while typed failures preserve whether the
+  attempted page was initial or a continuation.
+- `SessionDirectoryPager` and `SessionHistoryPager` own generation fencing,
+  query isolation, live reconciliation, stable session/message dedupe, ordered
+  prepend accumulation, and the eight-empty-page continuation ceiling. Search
+  matches only subject, contact name, latest visible text, and attachment names.
+- Release validation rebuilds all three JNI libraries from the exact workspace
+  Rust candidate and verifies the two new exports in every AAR ABI. A released
+  AAR is not evidence for the source candidate.
+
 ## Session audio levels
 
 - The ABI-locked JNI surface adds `subscribeAudioLevels`, `nextAudioLevels`,

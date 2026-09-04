@@ -166,6 +166,65 @@ class OrigonClient(
         },
     )
 
+    /** Finite strict directory/search page load. */
+    fun sessionDirectoryPageUpdates(
+        request: SessionDirectoryPageRequest = SessionDirectoryPageRequest(),
+    ): Flow<SessionDirectoryPageLoadUpdate> {
+        require(request.pageSize in 1..100) { "directory page size must be between 1 and 100" }
+        return loaderFlow(
+            start = { handle ->
+                SessionBridge.directoryPageLoaderStart(
+                    handle,
+                    request.pageSize,
+                    request.cursor,
+                    request.search,
+                )
+            },
+            decode = { result ->
+                when (result.status) {
+                    SessionBridge.LOADER_UPDATE -> SessionDirectoryPageLoadUpdate.Page(
+                        decodeSessionDirectoryPage(result.payloadJson.orEmpty()),
+                    )
+                    SessionBridge.LOADER_ERROR -> SessionDirectoryPageLoadUpdate.Failed(
+                        result.toSessionException(),
+                        request.phase,
+                    )
+                    else -> null
+                }
+            },
+        )
+    }
+
+    /** Finite strict chronological transcript page load. */
+    fun sessionHistoryPageUpdates(
+        id: String,
+        request: SessionHistoryPageRequest = SessionHistoryPageRequest(),
+    ): Flow<SessionHistoryPageLoadUpdate> {
+        require(request.pageSize in 1..250) { "history page size must be between 1 and 250" }
+        return loaderFlow(
+            start = { handle ->
+                SessionBridge.sessionHistoryPageLoaderStart(
+                    handle,
+                    id,
+                    request.pageSize,
+                    request.cursor,
+                )
+            },
+            decode = { result ->
+                when (result.status) {
+                    SessionBridge.LOADER_UPDATE -> SessionHistoryPageLoadUpdate.Page(
+                        decodeSessionHistoryPage(result.payloadJson.orEmpty()),
+                    )
+                    SessionBridge.LOADER_ERROR -> SessionHistoryPageLoadUpdate.Failed(
+                        result.toSessionException(),
+                        request.phase,
+                    )
+                    else -> null
+                }
+            },
+        )
+    }
+
     suspend fun cachedSession(id: String): SessionSnapshot? =
         sessionUpdates(id, SessionLoadPolicy.CACHE_ONLY).firstOrNull()
             ?.let { update ->
