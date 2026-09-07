@@ -302,7 +302,11 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
     val canSend by chat.canSend.collectAsState()
     val focusedLoadState by chat.focusedLoadState.collectAsState()
     val serverConfig by sdk.serverConfig.collectAsState()
-    val endpointPolicy = ExampleEndpointPolicy.from(serverConfig)
+    val configAuthority by sdk.configAuthority.collectAsState()
+    val endpointPolicy = ExampleEndpointPolicy.from(
+        serverConfig,
+        authoritative = configAuthority is SDKManager.ConfigAuthorityState.Authoritative,
+    )
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -559,6 +563,20 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
                     },
                 )
 
+                when (configAuthority) {
+                    is SDKManager.ConfigAuthorityState.TransientFailure -> ConfigStatusBar(
+                        message = "Offline configuration is view-only.",
+                        action = "Retry",
+                        onAction = sdk::retryServerConfig,
+                    )
+                    is SDKManager.ConfigAuthorityState.Terminal -> ConfigStatusBar(
+                        message = "This endpoint is no longer available.",
+                        action = "Change endpoint",
+                        onAction = onChangeEndpoint,
+                    )
+                    else -> Unit
+                }
+
                 if (voice != null) {
                     // A voice row is a different VIEW OF THE ROOT, not a place
                     // to navigate to — so it fills the content slot in place.
@@ -807,6 +825,25 @@ private fun ChatContent(sdk: SDKManager, onChangeEndpoint: () -> Unit) {
 
     // 96dp so the pill clears the composer.
     ToastHost(toast, bottomPadding = 96.dp)
+}
+
+@Composable
+private fun ConfigStatusBar(message: String, action: String, onAction: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(OrigonTheme.colors.screenBackground)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(message, style = MaterialTheme.typography.bodySmall)
+        Text(
+            action,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.clickable(onClick = onAction).padding(8.dp),
+        )
+    }
 }
 
 private class PreviewRequest(val attachments: List<Attachment>, val index: Int)

@@ -71,6 +71,24 @@ class EndpointConfigPolicyTest {
         assertEquals("New", replacement.value?.startMessage)
     }
 
+    @Test
+    fun cachedConfigurationKeepsGreetingButDisablesEveryAction() {
+        val cached = config(
+            chat = true,
+            call = true,
+            multi = true,
+            greeting = "Cached greeting",
+            attachments = ExampleAttachmentPolicy(images = true, documents = true),
+        )
+        val policy = ExampleEndpointPolicy.from(cached, authoritative = false)
+        assertEquals("Cached greeting", policy.greeting)
+        assertFalse(policy.showsComposer)
+        assertFalse(policy.showsVoiceOnlyAction)
+        assertFalse(policy.showsComposerVoiceAction)
+        assertFalse(policy.promptSendEnabled)
+        assertFalse(policy.allowsAttachment("image/jpeg"))
+    }
+
     private fun config(
         chat: Boolean,
         call: Boolean,

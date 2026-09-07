@@ -1,6 +1,5 @@
 package ai.origon.sdk
 
-import ai.origon.sdk.bridge.AttachmentPolicy
 import ai.origon.sdk.bridge.AudioLevelsNextBridge
 import ai.origon.sdk.bridge.SessionEvent
 import ai.origon.sdk.bridge.SessionLoaderResult
@@ -78,14 +77,12 @@ internal object SessionBridge {
 
     // ── Local getters (read from cached /config body) ────────────────
 
-    @JvmStatic external fun getStartMessage(handle: Long): String
-    @JvmStatic external fun isMultipleChannelsAllowed(handle: Long): Boolean
-    @JvmStatic external fun isChatEnabled(handle: Long): Boolean
-    @JvmStatic external fun isCallEnabled(handle: Long): Boolean
-    @JvmStatic external fun getAttachmentPolicy(handle: Long): AttachmentPolicy
+    @JvmStatic external fun serverConfig(handle: Long): String
 
     // ── Finite cache/network loaders ─────────────────────────────────
 
+    @JvmStatic external fun configLoaderStart(handle: Long): Long
+    @JvmStatic external fun configRetry(handle: Long): Long
     @JvmStatic external fun sessionLoaderStart(handle: Long, id: String, policy: Int): Long
     @JvmStatic external fun directoryLoaderStart(handle: Long, policy: Int): Long
     @JvmStatic external fun directoryPageLoaderStart(

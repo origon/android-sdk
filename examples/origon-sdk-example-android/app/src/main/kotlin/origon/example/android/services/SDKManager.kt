@@ -4,6 +4,8 @@ import android.content.Context
 import ai.origon.sdk.ClientConfig
 import ai.origon.sdk.ClientEvent
 import ai.origon.sdk.OrigonClient
+import ai.origon.sdk.ServerConfigLoadUpdate
+import ai.origon.sdk.SessionException
 import ai.origon.sdk.SessionSummary
 import ai.origon.sdk.SessionsLoadUpdate
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +40,14 @@ import kotlinx.coroutines.withContext
  */
 class SDKManager(private val appContext: Context) {
 
+    sealed interface ConfigAuthorityState {
+        data object Unavailable : ConfigAuthorityState
+        data object Cached : ConfigAuthorityState
+        data object Authoritative : ConfigAuthorityState
+        data class TransientFailure(val error: SessionException) : ConfigAuthorityState
+        data class Terminal(val error: SessionException) : ConfigAuthorityState
+    }
+
     /** App-scoped scope for the poll loop and service event collectors. */
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -53,8 +63,12 @@ class SDKManager(private val appContext: Context) {
         private set
     private val _serverConfig = MutableStateFlow<ExampleServerConfig?>(null)
     val serverConfig: StateFlow<ExampleServerConfig?> = _serverConfig.asStateFlow()
+    private val _configAuthority = MutableStateFlow<ConfigAuthorityState>(ConfigAuthorityState.Unavailable)
+    val configAuthority: StateFlow<ConfigAuthorityState> = _configAuthority.asStateFlow()
+    val hasAuthoritativeConfig: Boolean
+        get() = _configAuthority.value === ConfigAuthorityState.Authoritative
     val endpointPolicy: ExampleEndpointPolicy
-        get() = ExampleEndpointPolicy.from(_serverConfig.value)
+        get() = ExampleEndpointPolicy.from(_serverConfig.value, hasAuthoritativeConfig)
 
     /** Broadcast of every event drained from [OrigonClient.pollEvent]. */
     private val _events = MutableSharedFlow<ClientEvent>(extraBufferCapacity = 256)
@@ -72,6 +86,7 @@ class SDKManager(private val appContext: Context) {
     val chat = ChatService(this)
 
     private var pollJob: Job? = null
+    private var configJob: Job? = null
 
     // MARK: - Lifecycle
 
@@ -79,6 +94,7 @@ class SDKManager(private val appContext: Context) {
     suspend fun initialize(endpoint: String, userId: String? = null, token: String? = null) {
         val configToken = configReplacement.begin()
         _serverConfig.value = null
+        _configAuthority.value = ConfigAuthorityState.Unavailable
         chat.clientWillChange()
         val config = ClientConfig(
             endpoint = endpoint,
@@ -99,12 +115,16 @@ class SDKManager(private val appContext: Context) {
         chat.clientDidChange()
         _isReady.value = true
         startPolling()
+        observeConfigUpdates(newClient, configToken, retry = false)
     }
 
     /** Destroy the client, reset child services, and stop polling. */
     fun teardown() {
+        configJob?.cancel()
+        configJob = null
         configReplacement.begin()
         _serverConfig.value = null
+        _configAuthority.value = ConfigAuthorityState.Unavailable
         stopPolling()
         chat.destroy()
         _sessions.value = emptyList()
@@ -112,6 +132,57 @@ class SDKManager(private val appContext: Context) {
         client = null
         checkpointEndpoint = null
         _isReady.value = false
+    }
+
+    fun retryServerConfig() {
+        val current = client ?: return
+        observeConfigUpdates(current, configReplacement.currentEpoch, retry = true)
+    }
+
+    private fun observeConfigUpdates(current: OrigonClient, token: Long, retry: Boolean) {
+        if (!retry) _configAuthority.value = ConfigAuthorityState.Cached
+        configJob?.cancel()
+        configJob = scope.launch {
+            val updates = if (retry) current.retryServerConfig() else current.serverConfigUpdates()
+            runCatching {
+                updates.collect { update ->
+                    if (client !== current || configReplacement.currentEpoch != token) return@collect
+                    when (update) {
+                        is ServerConfigLoadUpdate.Snapshot -> {
+                            val next = ExampleServerConfig.from(update.value.config)
+                            if (!configReplacement.install(next, token)) return@collect
+                            _serverConfig.value = next
+                            _configAuthority.value = if (update.value.authoritative) {
+                                ConfigAuthorityState.Authoritative
+                            } else {
+                                ConfigAuthorityState.Cached
+                            }
+                        }
+                        is ServerConfigLoadUpdate.RefreshFailed -> {
+                            applyConfigFailure(update.error)
+                        }
+                    }
+                }
+            }.onFailure { error ->
+                if (client === current && configReplacement.currentEpoch == token &&
+                    error is SessionException
+                ) {
+                    applyConfigFailure(error)
+                }
+            }
+        }
+    }
+
+    private fun applyConfigFailure(error: SessionException) {
+        if (error.statusCode in setOf(400, 401, 403, 404)) {
+            configReplacement.begin()
+            _serverConfig.value = null
+            _sessions.value = emptyList()
+            chat.destroy()
+            _configAuthority.value = ConfigAuthorityState.Terminal(error)
+        } else {
+            _configAuthority.value = ConfigAuthorityState.TransientFailure(error)
+        }
     }
 
     internal suspend fun checkpoint(sessionId: String): ExampleCheckpoint? {
