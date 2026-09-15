@@ -33,12 +33,26 @@ done
 
 staging="$(mktemp -d)"
 trap 'rm -rf "$staging"' EXIT
-unzip -q "$AAR_PATH" 'classes.jar' 'jni/*/libsession.so' -d "$staging"
+if command -v unzip >/dev/null; then
+    unzip -q "$AAR_PATH" 'classes.jar' 'jni/*/libsession.so' -d "$staging"
+else
+    command -v jar >/dev/null || { echo "ERROR: unzip or jar is required"; exit 1; }
+    absolute_aar="$(cd "$(dirname "$AAR_PATH")" && pwd)/$(basename "$AAR_PATH")"
+    (cd "$staging" && jar xf "$absolute_aar" classes.jar jni)
+fi
 
 command -v javap >/dev/null || { echo "ERROR: javap is required"; exit 1; }
 public_api="$(javap -classpath "$staging/classes.jar" ai.origon.sdk.OrigonClient)"
 [[ "$public_api" == *"public final void sendDtmf(java.lang.String, char);"* ]] || {
     echo "ERROR: public AAR API is missing OrigonClient.sendDtmf(String, char)"
+    exit 1
+}
+[[ "$public_api" == *"sessionDirectoryPageUpdates"* ]] || {
+    echo "ERROR: public AAR API is missing sessionDirectoryPageUpdates"
+    exit 1
+}
+[[ "$public_api" == *"sessionHistoryPageUpdates"* ]] || {
+    echo "ERROR: public AAR API is missing sessionHistoryPageUpdates"
     exit 1
 }
 for unsupported in receiveDtmf onDtmf dtmfReceived; do
@@ -53,6 +67,14 @@ bridge_source="sdk/src/main/kotlin/ai/origon/sdk/SessionBridge.kt"
 bridge_exports="$(sed -nE 's/.*external fun ([A-Za-z0-9_]+).*/\1/p' "$bridge_source")"
 [[ "$bridge_exports" == *"sendDtmf"* ]] || {
     echo "ERROR: JNI producer is missing sendDtmf"
+    exit 1
+}
+[[ "$bridge_exports" == *"directoryPageLoaderStart"* ]] || {
+    echo "ERROR: JNI producer is missing directoryPageLoaderStart"
+    exit 1
+}
+[[ "$bridge_exports" == *"sessionHistoryPageLoaderStart"* ]] || {
+    echo "ERROR: JNI producer is missing sessionHistoryPageLoaderStart"
     exit 1
 }
 
