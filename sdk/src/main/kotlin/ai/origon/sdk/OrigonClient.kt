@@ -436,6 +436,11 @@ class OrigonClient(
         withHandle { SessionBridge.joinChat(it, input.sessionId, input.url, input.token) }
     }
 
+    /** End the customer conversation. Blocking; invoke off the UI thread. */
+    fun endChat(id: String) {
+        withHandle { SessionBridge.endChat(it, id) }
+    }
+
     fun endSession(id: String) {
         withHandle { SessionBridge.endSession(it, id) }
     }

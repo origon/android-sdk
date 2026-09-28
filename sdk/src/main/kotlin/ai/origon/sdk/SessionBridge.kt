@@ -175,6 +175,7 @@ internal object SessionBridge {
         token: String,
     )
 
+    @JvmStatic external fun endChat(handle: Long, id: String)
     @JvmStatic external fun endSession(handle: Long, id: String)
     @JvmStatic external fun endAllSessions(handle: Long)
 
@@ -370,6 +371,8 @@ internal object SessionBridge {
      *  `uploadId` passed to `uploadAttachment(...)`. Only fires on
      *  `uploadAttachment`. */
     const val ERROR_CANCELLED = 9
+    const val ERROR_CHAT_REFUSED = 10
+    const val ERROR_CHAT_END = 11 // code: pending or unconfirmed
 
     // Disconnect reason discriminants — value of SessionEvent.disconnectReasonKind.
     const val DISCONNECT_REASON_LOCAL_CLOSE = 1
