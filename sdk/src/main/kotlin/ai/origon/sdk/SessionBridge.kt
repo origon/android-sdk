@@ -131,7 +131,8 @@ internal object SessionBridge {
      * type was racing that reap. Carrying the message here makes the race
      * unreachable. A first message that fails to DELIVER does not throw — the
      * session is live and the failure arrives as `MessageUpdated` with
-     * `status = failed`; only a TERMINAL refusal throws.
+     * `status = failed` while the actor stays live. Pre-admission failure,
+     * actor termination and terminal refusal throw; cleanup is generation-bound.
      */
     @JvmStatic external fun startChat(
         handle: Long,

@@ -373,11 +373,10 @@ class OrigonClient(
      * session id comes back BEFORE the message is sent, so the provisional
      * `MessageAdded` event always has a session to belong to.
      *
-     * A first message that fails to DELIVER does not throw: the session is
-     * live and the failure arrives as `MessageUpdated` with `status = FAILED`,
-     * so the user can retry. Only a TERMINAL refusal (the session is already
-     * gone) throws — returning normally would leave the app rendering a
-     * composer on a dead conversation.
+     * An admitted first message that fails to deliver leaves a failed message
+     * for retry while its actor remains live. Pre-admission failure, actor
+     * termination or terminal refusal throws and retires only this start's
+     * actor; the failed first send never silently reopens another incarnation.
      */
     fun startChat(options: StartChatOptions): StartSessionResponse {
         val firstJson =
