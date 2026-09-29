@@ -1,5 +1,13 @@
 # Upload cancellation wrapper correction
 
+## Publication follow-up — 0.3.7
+
+Version 0.3.7 is published on Maven Central. Its AAR SHA256 exactly matches the
+candidate below. Re-ran the complete AAR verifier against the published artifact:
+all three architectures pass. The example and installation instructions now use
+this released coordinate. The pending-publication notes below describe the
+original candidate validation, and are superseded by this follow-up.
+
 ## Problem and change
 
 Published 0.3.6 exposes Kotlin deleteAttachment, but its native library exports

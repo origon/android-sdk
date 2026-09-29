@@ -29,8 +29,8 @@ sync, pick a device, and Run.
 
 ### Command line (no Android Studio)
 
-The example targets SDK `0.3.7`, which includes the corrected `cancelUpload`
-binding. Until that release is published, use the local candidate override below. To validate a sibling SDK build,
+The example defaults to released SDK `0.3.7`, which includes the corrected
+`cancelUpload` binding. Use the override below to validate a local candidate. To validate a sibling SDK build,
 install the required toolchain, publish it under a unique local version, and
 select the same version explicitly:
 

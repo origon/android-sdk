@@ -396,7 +396,7 @@ while (true) {
 
 ### Attachments
 
-The corrected cancellation binding requires 0.3.7 (pending publication) or a
+The corrected cancellation binding requires 0.3.7 or a
 local candidate. Version 0.3.6 exposes an obsolete `deleteAttachment` method
 whose native symbol is absent; do not call that method.
 
