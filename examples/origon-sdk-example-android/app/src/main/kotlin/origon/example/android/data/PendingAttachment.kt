@@ -9,10 +9,9 @@ import ai.origon.sdk.Attachment
  * [id] is a local UUID assigned at pick time. It serves two purposes:
  * (1) the stable list key for the composer's tile row; and (2) the
  * `uploadId` passed to `client.uploadAttachment(...)` so that
- * `client.deleteAttachment(id)` can cancel the upload in-flight (the
- * SDK's dual-purpose deleteAttachment matches the id against its
- * in-flight upload table first, then falls through to a server-side
- * DELETE). Once the upload completes, [attachment] holds the
+ * `client.cancelUpload(id)` can cancel the upload in-flight without a
+ * network request. Completed draft removal changes local state only.
+ * Once the upload completes, [attachment] holds the
  * server-issued [Attachment].
  */
 data class PendingAttachment(

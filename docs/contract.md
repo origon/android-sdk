@@ -61,7 +61,7 @@ registers cross-repository contracts that must change and validate together.
   policy model are removed. Public convenience properties remain source-compatible
   and derive exclusively from the atomic `serverConfig` snapshot.
 - Cached config, directory, and transcript state is view-only. The example
-  gates start/open/restore/send/typing/upload/server-delete and FCM registration
+  gates start/open/restore/send/typing/upload and FCM registration
   until an authoritative update, retains view-only state plus retry for
   transient/5xx failure, and synchronously purges exact-scope in-memory state
   for 400/401/403/config-404 before recovery/logout.
@@ -229,3 +229,15 @@ the recorded hash of all three embedded libraries and runs the complete
 stripped/JNI/retired-symbol/alignment verifier. The workspace release driver
 must reject a Central dry-run containing any compile/assemble/AAR bundle/native
 merge/strip task before an owner may authorize upload.
+
+## Upload cancellation
+
+`OrigonClient.cancelUpload(uploadId: String): Boolean` binds JNI
+`SessionBridge.cancelUpload(Long, String): Boolean` (descriptor
+`(JLjava/lang/String;)Z`) from workspace/apps/sdk/session/src/jni_bridge.rs.
+This replaces the obsolete, unimplemented `deleteAttachment` wrapper. Cancellation
+is synchronous and local, returning false for absent/settled uploads. It does not
+require authoritative configuration or issue HTTP requests. Completed attachments
+are immutable; draft removal is local state only. Native semantics are defined in
+workspace/apps/sdk/session/docs/contract.md#cancellation. SDK 0.3.6 predates this
+wrapper correction; consumers require the corrected release or a local candidate.

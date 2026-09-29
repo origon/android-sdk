@@ -259,10 +259,9 @@ internal object SessionBridge {
      * convenience wrapper does this automatically).
      *
      * [uploadId] is a caller-supplied opaque correlation key. Pass the
-     * same value to [deleteAttachment] (as the `key` argument) to
-     * cancel this upload before it completes. After upload completes
-     * successfully, use the server-issued `attachment.id` for deletion
-     * instead. [uploadId] must be unique across active uploads.
+     * same value to [cancelUpload] to cancel this upload before it completes.
+     * Completed attachments are immutable; removing one from a draft is
+     * local UI state only. [uploadId] must be unique across active uploads.
      *
      * [progressCb] is optional. When provided, its `onProgress` fires
      * from a Rust worker thread (see [UploadProgressCallback]).
@@ -273,7 +272,7 @@ internal object SessionBridge {
      * precheck failures (`empty_file`, `policy_unsupported_type`,
      * `policy_type_disabled`, `policy_too_large`), `kind = ERROR_HTTP`
      * / `ERROR_SERVER_UNAVAILABLE` for wire failures, or `kind =
-     * ERROR_CANCELLED` when cancelled via [deleteAttachment].
+     * ERROR_CANCELLED` when cancelled via [cancelUpload].
      */
     @JvmStatic external fun uploadAttachment(
         handle: Long,
@@ -284,18 +283,12 @@ internal object SessionBridge {
     ): String
 
     /**
-     * Cancel an in-flight upload or delete a completed attachment.
-     * `key` is dual-purpose: matched against the SDK's in-flight
-     * upload table (keyed by `uploadId`) first; if found, the upload
-     * is cancelled with no network call. Otherwise `key` is treated
-     * as a server-issued `attachment.id` and the SDK calls
-     * `DELETE <endpoint>/attachment/:key`. Session-less like
-     * [uploadAttachment]. Blocking — use from [Dispatchers.IO].
+     * Cancel an in-flight upload by its caller-supplied [uploadId].
+     * Returns true when an active upload was cancelled, false if it already
+     * settled, was cancelled, or never started. Purely local: no network call
+     * or completed-attachment deletion. Matches native JNI (JLjava/lang/String;)Z.
      */
-    @JvmStatic external fun deleteAttachment(
-        handle: Long,
-        key: String,
-    )
+    @JvmStatic external fun cancelUpload(handle: Long, uploadId: String): Boolean
 
     // ── Active sessions snapshot ─────────────────────────────────────
 
@@ -368,7 +361,7 @@ internal object SessionBridge {
     const val ERROR_HTTP = 6
     const val ERROR_ATTACHMENT = 7
     const val ERROR_OTHER = 8
-    /** Upload was cancelled via `deleteAttachment(...)` using the same
+    /** Upload was cancelled via `cancelUpload(...)` using the same
      *  `uploadId` passed to `uploadAttachment(...)`. Only fires on
      *  `uploadAttachment`. */
     const val ERROR_CANCELLED = 9

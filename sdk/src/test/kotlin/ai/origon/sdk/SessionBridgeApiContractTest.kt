@@ -10,6 +10,23 @@ import kotlinx.serialization.json.Json
 
 class SessionBridgeApiContractTest {
     @Test
+    fun uploadCancellationMatchesNativeBooleanDescriptor() {
+        assertEquals(
+            Boolean::class.javaPrimitiveType,
+            SessionBridge::class.java.getDeclaredMethod(
+                "cancelUpload", Long::class.javaPrimitiveType, String::class.java,
+            ).returnType,
+        )
+        assertEquals(
+            Boolean::class.javaPrimitiveType,
+            OrigonClient::class.java.getDeclaredMethod("cancelUpload", String::class.java).returnType,
+        )
+        for (type in listOf(SessionBridge::class.java, OrigonClient::class.java)) {
+            assertTrue(type.declaredMethods.none { it.name == "deleteAttachment" })
+        }
+    }
+
+    @Test
     fun initializeAndConfigBridgeDescriptorsAreExact() {
         val bridge = SessionBridge::class.java
         assertEquals(

@@ -592,10 +592,9 @@ class OrigonClient(
      * There is no `sessionId` and no session prerequisite — an attachment
      * can be the first thing a visitor sends.
      *
-     * [uploadId] doubles as the cancellation key — pass it as
-     * `attachmentId` to [deleteAttachment] while the upload is in
-     * flight to abort it (throws with `kind = ERROR_CANCELLED`). After
-     * completion, use the server-issued `attachment.id` for deletion.
+     * Pass [uploadId] to [cancelUpload] while the upload is in flight to
+     * abort it (the upload throws with `kind = ERROR_CANCELLED`). Completed
+     * attachments are immutable; removing one from a draft is local UI state.
      *
      * [onProgress] fires from a JNI worker thread; hop to the main
      * thread before touching UI state. `percent` is `null` when the
@@ -700,27 +699,17 @@ class OrigonClient(
     }
 
     /**
-     * Cancel an in-flight upload or delete a completed attachment.
-     * Session-less like [uploadAttachment].
+     * Cancel an in-flight upload using the same [uploadId] passed to
+     * [uploadAttachment]. Returns true if an active upload was cancelled;
+     * false if it never started, already settled, or was already cancelled.
+     * The upload's awaiter throws [SessionException] with ERROR_CANCELLED.
      *
-     * `attachmentId` is dual-purpose: it can be either the `uploadId`
-     * passed to [uploadAttachment] (cancels the in-flight upload — no
-     * network call, the upload's awaiter throws [SessionException]
-     * with `kind = SessionBridge.ERROR_CANCELLED`) or the server-issued
-     * `attachment.id` of a completed upload (issues `DELETE` on the
-     * server). The SDK figures it out: it checks its in-flight uploads
-     * table first, then falls through to the wire call.
-     *
-     * Runs on [Dispatchers.IO]. The server is idempotent on a missing
-     * object and answers 204, so a successful return does not prove the
-     * id existed; a 404 means the route did not match. An id that could
-     * not form a usable path is refused by the SDK before any request.
+     * This synchronous operation only signals local work; it makes no network
+     * request and does not delete completed attachments. Remove a completed
+     * attachment from the draft's local state instead.
      */
-    suspend fun deleteAttachment(attachmentId: String) {
-        withContext(Dispatchers.IO) {
-            withHandle { SessionBridge.deleteAttachment(it, attachmentId) }
-        }
-    }
+    fun cancelUpload(uploadId: String): Boolean =
+        withHandle { SessionBridge.cancelUpload(it, uploadId) }
 
     // ── Events ───────────────────────────────────────────────────────
 

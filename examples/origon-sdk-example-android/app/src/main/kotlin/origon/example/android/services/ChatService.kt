@@ -585,25 +585,12 @@ class ChatService internal constructor(
 
         val row = removed ?: return
         val client = sdkClient() ?: return
-        when (row.status) {
-            PendingAttachment.Status.UPLOADING -> {
-                // deleteAttachment matches the local id against the SDK's
-                // in-flight upload table and cancels it. Fires regardless of
-                // which list hosted the row — the write lane is
-                // widget-scoped, and a draft-list upload is now the common
-                // case since uploads no longer wait on a session.
-                scope.launch {
-                    runCatching { client.deleteAttachment(id) }
-                }
-            }
-            PendingAttachment.Status.COMPLETED -> {
-                val serverId = row.attachment?.id ?: return
-                scope.launch {
-                    runCatching { client.deleteAttachment(serverId) }
-                }
-            }
-            PendingAttachment.Status.ERROR -> Unit // local remove only
+        if (row.status == PendingAttachment.Status.UPLOADING) {
+            // Cancellation uses the caller's upload id and performs no network I/O.
+            runCatching { client.cancelUpload(id) }
+                .onFailure { _error.tryEmit("Could not cancel upload") }
         }
+        // Completed attachments are immutable; removing the tile above is sufficient.
     }
 
     // MARK: - Teardown

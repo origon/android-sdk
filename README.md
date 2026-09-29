@@ -77,7 +77,7 @@ In your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("ai.origon:sdk:0.3.6")
+    implementation("ai.origon:sdk:0.3.7")
 }
 ```
 
@@ -396,6 +396,10 @@ while (true) {
 
 ### Attachments
 
+The corrected cancellation binding requires 0.3.7 (pending publication) or a
+local candidate. Version 0.3.6 exposes an obsolete `deleteAttachment` method
+whose native symbol is absent; do not call that method.
+
 Upload a file, then attach the returned `Attachment` to your next
 message. **There is no `sessionId`** — attachments are scoped to the
 widget the client was created for, so an attachment can be the first
@@ -404,7 +408,9 @@ thing a visitor sends, before any session exists. `uploadAttachment` is a
 filesystem path, a `content://` `Uri`, or in-memory `ByteArray`:
 
 ```kotlin
+val uploadId = java.util.UUID.randomUUID().toString()
 val attachment = client.uploadAttachment(
+    uploadId = uploadId,
     uri = pickedUri,
     fileName = "photo.jpg",
 ) { progress ->
@@ -417,9 +423,10 @@ client.sendMessage(
     payload = SendMessagePayload(attachments = listOf(attachment)),
 )
 
-// Cancel an in-flight upload (pass the uploadId) or delete a completed
-// one (pass attachment.id) — the SDK works out which.
-client.deleteAttachment(attachmentId = attachment.id)
+// In a separate UI cancellation handler, use the uploadId supplied to
+// uploadAttachment while that upload is still running:
+val cancelled = client.cancelUpload(uploadId)
+// Completed attachments are immutable. Remove them from local draft state only.
 ```
 
 Uploads are prechecked against the tenant's `attachmentPolicy` (type and
@@ -564,7 +571,7 @@ requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, a
 | `notifyTyping(id)` | Chat — register a keystroke; SDK debounces outbound `/typing` POSTs. |
 | `stopTyping(id)` | Chat — force outbound typing state to "off" immediately. |
 | `uploadAttachment(path \| uri \| bytes, fileName, …)` | `suspend`; upload a file (path / `Uri` / `ByteArray` overloads) against the client's widget and return the server-issued `Attachment`. No session required. Reports progress via `onProgress`. |
-| `deleteAttachment(attachmentId)` | `suspend`; cancel an in-flight upload (pass the `uploadId`) or delete a completed attachment (pass `attachment.id`). No session required. |
+| `cancelUpload(uploadId)` | Synchronous, local-only cancellation; returns whether an active upload was cancelled. No network request or completed-attachment deletion. |
 | `activeSessions()` | Snapshot of every active session. |
 | `sessionDirectoryUpdates(policy)` | Finite `Flow`: cached directory then authoritative network directory by default. |
 | `sessionDirectoryPageUpdates(request)` | Finite strict directory/search page Flow; defaults to 50 rows (100 maximum) and types initial versus continuation failure. |

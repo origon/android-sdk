@@ -55,9 +55,18 @@ public_api="$(javap -classpath "$staging/classes.jar" ai.origon.sdk.OrigonClient
     echo "ERROR: public AAR API is missing sessionHistoryPageUpdates"
     exit 1
 }
-for unsupported in receiveDtmf onDtmf dtmfReceived; do
+[[ "$public_api" == *"public final boolean cancelUpload(java.lang.String);"* ]] || {
+    echo "ERROR: public AAR API is missing OrigonClient.cancelUpload(String): Boolean"
+    exit 1
+}
+bridge_api="$(javap -s -classpath "$staging/classes.jar" ai.origon.sdk.SessionBridge)"
+[[ "$bridge_api" == *"public static final native boolean cancelUpload(long, java.lang.String);"* ]] || {
+    echo "ERROR: AAR JNI cancellation declaration must return boolean"
+    exit 1
+}
+for unsupported in receiveDtmf onDtmf dtmfReceived deleteAttachment; do
     [[ "$public_api" != *"$unsupported"* ]] || {
-        echo "ERROR: public AAR exposes unsupported DTMF receive API $unsupported"
+        echo "ERROR: public AAR exposes unsupported API $unsupported"
         exit 1
     }
 done
@@ -91,7 +100,7 @@ for abi in arm64-v8a armeabi-v7a x86_64; do
         expected="Java_ai_origon_sdk_SessionBridge_${export_name}"
         [[ "$symbols" == *"$expected"* ]] || { echo "ERROR: $abi missing $expected"; exit 1; }
     done <<< "$bridge_exports"
-    for retired_name in getSessions getSession openChatWithIntent; do
+    for retired_name in getSessions getSession openChatWithIntent deleteAttachment; do
         retired="Java_ai_origon_sdk_SessionBridge_${retired_name}"
         [[ "$symbols" != *"$retired"* ]] || {
             echo "ERROR: $abi still exports retired $retired"
