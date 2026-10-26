@@ -57,6 +57,11 @@ registers cross-repository contracts that must change and validate together.
   loader lifecycle. Flow cancellation cancels/joins/frees only observation;
   `close()` also cancels the internal authority collector and native destroy
   joins the mandatory refresh. Convenience properties read the same snapshot.
+- `ServerConfig.isChatEndEnabled` (JSON `chatEndEnabled`, default `true`; convenience `isChatEndEnabled`)
+  says whether the backend offers End chat. It mirrors the shared core's `/config` `chat.end`: only an
+  explicit `false`, which an Agents-routed client gets, withholds it. A core snapshot without the field
+  decodes as `true`, and `DISABLED` is `false`. Hosts hide End when it is `false`; `endChat(id)` itself
+  is unchanged (workspace `apps/sdk/CONTRACT.md` "`/config` `chat.end`").
 - The five legacy scalar JNI config methods and their bridge-only attachment
   policy model are removed. Public convenience properties remain source-compatible
   and derive exclusively from the atomic `serverConfig` snapshot.
