@@ -380,12 +380,18 @@ internal object SessionBridge {
     const val DISCONNECT_REASON_CAPABILITY_MISSING = 9
     const val DISCONNECT_REASON_ILLEGAL_STATE = 10
     const val DISCONNECT_REASON_RESOURCE_EXHAUSTED = 11
+    /** Retired with the v1 media wire: never produced; the number is not reused. */
     const val DISCONNECT_REASON_REPLAY_LOST = 12
     const val DISCONNECT_REASON_SERVER_CLOSED = 13
     const val DISCONNECT_REASON_TRANSPORT_CLOSED = 14
-    /** Server ended the session (`SESSION_ENDED`, 0x1040) — bridge collapse,
-     *  controller destroy, or idle-GC reap. Terminal; a transport close
-     *  follows. Mirrors `SESSION_DISCONNECT_REASON_SESSION_ENDED` in the
+    /** Server ended the session (ms-signal `Error` 10 or close 19) — bridge
+     *  collapse, controller destroy, idle-GC reap or drain. Terminal; a
+     *  transport close follows. Mirrors `SESSION_DISCONNECT_REASON_SESSION_ENDED` in the
      *  Rust JNI bridge (`apps/sdk/session/src/jni_bridge.rs`). */
     const val DISCONNECT_REASON_SESSION_ENDED = 15
+    /** The server speaks another media protocol version (ms-signal
+     *  `UpdateRequired`, or a dial refused at ALPN `orgn-media/2`). Terminal;
+     *  the app must update. Mirrors `SESSION_DISCONNECT_REASON_UPDATE_REQUIRED`
+     *  in the Rust JNI bridge (`apps/sdk/session/src/jni_bridge.rs`). */
+    const val DISCONNECT_REASON_UPDATE_REQUIRED = 16
 }

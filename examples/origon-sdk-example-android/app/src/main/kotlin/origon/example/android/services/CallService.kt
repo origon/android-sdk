@@ -181,6 +181,7 @@ class CallService(private val manager: SDKManager) {
         is DisconnectReason.IllegalState -> "Connection error"
         is DisconnectReason.ResourceExhausted -> "Server is at capacity"
         is DisconnectReason.ReplayLost -> "Connection lost"
+        is DisconnectReason.UpdateRequired -> "Please update the app to keep calling"
         is DisconnectReason.ServerClosed -> reason.detail ?: "Disconnected"
         is DisconnectReason.TransportClosed -> reason.detail ?: "Could not connect"
     }

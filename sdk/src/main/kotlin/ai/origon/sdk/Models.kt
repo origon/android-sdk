@@ -723,6 +723,7 @@ sealed class DisconnectReason {
     data object CapabilityMissing : DisconnectReason()
     data object IllegalState : DisconnectReason()
     data object ResourceExhausted : DisconnectReason()
+    /** Retired with the v1 media wire: never produced. */
     data object ReplayLost : DisconnectReason()
 
     /**
@@ -732,6 +733,13 @@ sealed class DisconnectReason {
      * Terminal — the SDK does not reconnect; a transport close follows.
      */
     data object SessionEnded : DisconnectReason()
+
+    /**
+     * The server speaks another media protocol version (ms-signal
+     * `UpdateRequired`, or a dial refused at ALPN `orgn-media/2`). Terminal —
+     * the app must update.
+     */
+    data object UpdateRequired : DisconnectReason()
     data class ServerClosed(val code: Long, val detail: String?) : DisconnectReason()
 
     /**
@@ -757,6 +765,7 @@ sealed class DisconnectReason {
                 SessionBridge.DISCONNECT_REASON_RESOURCE_EXHAUSTED -> ResourceExhausted
                 SessionBridge.DISCONNECT_REASON_REPLAY_LOST -> ReplayLost
                 SessionBridge.DISCONNECT_REASON_SESSION_ENDED -> SessionEnded
+                SessionBridge.DISCONNECT_REASON_UPDATE_REQUIRED -> UpdateRequired
                 SessionBridge.DISCONNECT_REASON_SERVER_CLOSED ->
                     ServerClosed(serverCode, serverDetail)
                 SessionBridge.DISCONNECT_REASON_TRANSPORT_CLOSED ->
