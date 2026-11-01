@@ -52,6 +52,9 @@ internal object SessionBridge {
 
     @JvmStatic external fun initLogging(filter: String?)
 
+    /** Call statistics for a voice session as JSON, or `null` while there are none. */
+    @JvmStatic external fun callStats(handle: Long, id: String): String?
+
     /**
      * Returns a non-zero opaque handle on success; throws
      * [SessionException] otherwise. Caller owns the handle and must

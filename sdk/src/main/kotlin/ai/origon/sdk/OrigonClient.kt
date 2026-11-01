@@ -503,6 +503,14 @@ class OrigonClient(
     }
 
     /**
+     * Call statistics for a voice session, or `null` while there are none.
+     * Read-only; cheap enough to poll every second.
+     */
+    fun callStats(sessionId: String): CallStats? =
+        withHandle { SessionBridge.callStats(it, sessionId) }
+            ?.let { JSON.decodeFromString(CallStats.serializer(), it) }
+
+    /**
      * Observe combined outbound, aggregate inbound, and endpoint-attributed
      * inbound levels for one active voice session.
      *
