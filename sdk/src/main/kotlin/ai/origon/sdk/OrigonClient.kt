@@ -112,6 +112,10 @@ class OrigonClient(
     val isChatEnabled: Boolean
         get() = serverConfig.isChatEnabled
 
+    /** Whether the backend offers End chat; hide the End control when `false`. */
+    val isChatEndEnabled: Boolean
+        get() = serverConfig.isChatEndEnabled
+
     val isCallEnabled: Boolean
         get() = serverConfig.isCallEnabled
 

@@ -561,7 +561,8 @@ requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, a
 | `restoreActiveChats()` | Passively attach retained active chats and return per-id outcomes. |
 | `openChat(sessionId, intent)` | Open one retained chat with `PASSIVE`, `EXPLICIT_NAVIGATION`, or `NOTIFICATION` authority. |
 | `joinCall(input)` / `joinChat(input)` | Attach to a previously-obtained `StartSessionResponse`. |
-| `endChat(id)` | End an owned customer chat, preserving its transcript. Blocking call: execute off the UI thread. Duplicate pending requests coalesce; failures are reported for retry. |
+| `endChat(id)` | End an owned customer chat, preserving its transcript. Blocking call: execute off the UI thread. Duplicate pending requests coalesce; failures are reported for retry. Offer it only when `isChatEndEnabled` is `true`. |
+| `isChatEndEnabled` | Whether the backend offers End chat (`false` for an Agents-routed client). |
 | `endSession(id)` / `endAllSessions()` | Close a single / every local session; customer chat cleanup detaches rather than ending the conversation. |
 | `sendDtmf(id, digit)` | Voice — send one uppercase ASCII `0-9`, `*`, `#`, or `A-D` control symbol to the CX flow. Produces no local tone or haptic. |
 | `observeAudioLevels(sessionId, observer)` | Voice — cancellable main-looper callback carrying aggregate outbound/inbound RMS and endpoint-attributed inbound levels. Retain the returned `AudioLevelObservation`. |

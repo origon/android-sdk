@@ -4,6 +4,7 @@ import android.content.Context
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.json.Json
@@ -82,6 +83,20 @@ class SessionBridgeApiContractTest {
         assertEquals(7L, snapshot.refreshedAt)
         assertEquals("Hello", snapshot.config.startMessage)
         assertTrue(snapshot.config.isChatEnabled)
+        // A core without `chatEndEnabled` (this fixture) offers End.
+        assertTrue(snapshot.config.isChatEndEnabled)
         assertTrue(snapshot.config.attachmentPolicy.images.enabled)
+    }
+
+    @Test
+    fun configCarriesWhetherEndIsOffered() {
+        val policy = """"attachmentPolicy":{"images":{"enabled":false,"maxSize":0},"documents":{"enabled":false,"maxSize":0},"videos":{"enabled":false,"maxSize":0},"audio":{"enabled":false,"maxSize":0}}"""
+        fun decode(end: String) = Json.decodeFromString<ServerConfig>(
+            """{"startMessage":"","multipleChannels":false,"chatEnabled":true,$end"callEnabled":false,$policy}""",
+        )
+        assertFalse(decode(""""chatEndEnabled":false,""").isChatEndEnabled)
+        assertTrue(decode(""""chatEndEnabled":true,""").isChatEndEnabled)
+        assertTrue(decode("").isChatEndEnabled)
+        assertFalse(ServerConfig.DISABLED.isChatEndEnabled)
     }
 }

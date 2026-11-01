@@ -334,6 +334,13 @@ data class ServerConfig(
     @SerialName("callEnabled")
     val isCallEnabled: Boolean,
     val attachmentPolicy: AttachmentPolicy,
+    /**
+     * Whether the backend offers End chat (`/config` `chat.end`; only an explicit `false`, as an
+     * Agents-routed client's, withholds it). A core without the field decodes as offered. Hide the
+     * End control when this is `false`.
+     */
+    @SerialName("chatEndEnabled")
+    val isChatEndEnabled: Boolean = true,
 ) {
     companion object {
         val DISABLED = ServerConfig(
@@ -342,6 +349,7 @@ data class ServerConfig(
             isChatEnabled = false,
             isCallEnabled = false,
             attachmentPolicy = AttachmentPolicy.DISABLED,
+            isChatEndEnabled = false,
         )
     }
 }
