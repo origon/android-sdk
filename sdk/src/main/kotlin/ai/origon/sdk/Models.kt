@@ -213,6 +213,12 @@ data class ClientConfig(
     val attributes: JsonObject? = null,
     /** Durable transcript cache is enabled unless explicitly disabled. */
     val chatCachePolicy: ChatCachePolicy = ChatCachePolicy.ENABLED,
+    /**
+     * Whether OpenNC noise suppression is wanted on a supported ABI. It applies
+     * until [OrigonClient.setNoiseSuppression] chooses, so a recreated client
+     * never undoes a user's toggle.
+     */
+    val noiseSuppression: Boolean = true,
 )
 
 enum class ChatCachePolicy { ENABLED, DISABLED }

@@ -43,6 +43,8 @@ class OrigonClient(
     private val cacheRoot = config.chatCachePolicy
         .takeIf { it == ChatCachePolicy.ENABLED }
         ?.let { ChatCacheStorage.ensureRoot(appContext) }
+    private val modelsDir = java.io.File(appContext.noBackupFilesDir, "ai.origon.sdk/models")
+        .takeIf { SessionBridge.noiseSuppressionSupported() }
     private val rawHandle: Long = SessionBridge.initialize(
         endpoint = config.endpoint,
         bundleId = appContext.packageName,
@@ -51,6 +53,8 @@ class OrigonClient(
         installationId = installationId,
         attributesJson = config.attributes?.let { JSON.encodeToString(JsonObject.serializer(), it) },
         cacheDir = cacheRoot?.absolutePath,
+        modelsDir = modelsDir?.absolutePath,
+        noiseSuppression = config.noiseSuppression,
     )
     private val nativeGate = NativeHandleGate(rawHandle)
     private val audioLevelObservations = AudioLevelObservationRegistry()
@@ -863,6 +867,21 @@ class OrigonClient(
                 "DTMF digit must be one uppercase ASCII symbol"
             }
             return digit
+        }
+
+        /** Whether this device's ABI has OpenNC noise suppression. */
+        val noiseSuppressionSupported: Boolean
+            get() = SessionBridge.noiseSuppressionSupported()
+
+        /**
+         * Turn OpenNC noise suppression on or off for the whole process, for every
+         * client and any call in progress. It works with no client open and wins
+         * over [ClientConfig.noiseSuppression]. Off uses the SDK's other noise
+         * suppressor; on fetches the model if it is missing. Does nothing on an
+         * unsupported ABI.
+         */
+        suspend fun setNoiseSuppression(enabled: Boolean) {
+            withContext(Dispatchers.IO) { SessionBridge.setNoiseSuppression(enabled) }
         }
 
         /**

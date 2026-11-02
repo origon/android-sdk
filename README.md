@@ -580,6 +580,8 @@ requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, a
 | `sessionUpdates(id, policy)` | Finite `Flow`: cached transcript then authoritative network transcript by default. |
 | `cachedSession(s)` / `refreshSession(s)` | Explicit suspend cache-only / network-only reads. |
 | `removeCachedSession` / `clearChatCache` / `pruneChatCache` | Suspend cache maintenance scoped to this client. |
+| `OrigonClient.setNoiseSuppression(enabled)` | Suspending. Turns OpenNC noise suppression on or off for the process, live, with or without a client; on fetches the model if it is missing. |
+| `OrigonClient.noiseSuppressionSupported` | Whether this ABI has OpenNC: `arm64-v8a` and `x86_64`, not `armeabi-v7a`. |
 | `OrigonClient.clearAllChatCaches(context)` | Handle-independent cache-root quarantine; close live clients first. |
 | `setAttributes(attributes)` | Replace session-level attributes injected on the next start. |
 | `OrigonClient.registerForPushNotifications(token)` | Companion. Register an FCM token (buffered until init; latest wins). |
@@ -592,7 +594,7 @@ requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, a
 
 | Type | Description |
 | --- | --- |
-| `ClientConfig` | endpoint, optional `token`, optional `userId`, attributes, and default-on `chatCachePolicy`. The app package is resolved from `Context`; `userId` defaults to the random no-backup app-install id. |
+| `ClientConfig` | endpoint, optional `token`, optional `userId`, attributes, default-on `chatCachePolicy`, and default-on `noiseSuppression`, which applies until `setNoiseSuppression` chooses. The app package is resolved from `Context`; `userId` defaults to the random no-backup app-install id. |
 | `Channel` | `CHAT`, `VOICE`. |
 | `SessionControl` | `AI`, `USER`. |
 | `MessageRole` | `AI`, `EXTERNAL`, `USER`, `SYSTEM`. |

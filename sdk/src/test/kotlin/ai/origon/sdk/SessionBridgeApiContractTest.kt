@@ -41,7 +41,20 @@ class SessionBridgeApiContractTest {
                 String::class.java,
                 String::class.java,
                 String::class.java,
+                String::class.java,
+                Boolean::class.javaPrimitiveType,
             ).returnType,
+        )
+        assertEquals(
+            Void.TYPE,
+            bridge.getDeclaredMethod(
+                "setNoiseSuppression",
+                Boolean::class.javaPrimitiveType,
+            ).returnType,
+        )
+        assertEquals(
+            Boolean::class.javaPrimitiveType,
+            bridge.getDeclaredMethod("noiseSuppressionSupported").returnType,
         )
         assertEquals(
             String::class.java,

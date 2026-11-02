@@ -1,0 +1,49 @@
+OpenNC speech denoising model (v1), as used by the `audio` crate's `opennc`
+feature.
+
+OpenNC
+Copyright 2026 Mustafa Akcanca
+https://github.com/MAkcanca/OpenNC
+
+The OpenNC code and model weights are licensed under the Apache License,
+Version 2.0 (the "License"); you may not use this file except in compliance
+with the License. A copy of the License ships alongside this notice (LICENSE)
+and is available at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations under
+the License.
+
+OpenNC includes code derived from the DeepFilterNet project, Copyright
+Hendrik Schroeter, used under the MIT License and the Apache License 2.0.
+
+Modifications: the shipped file, `opennc-v1-i8.ncw`, is Origon's re-export
+of the OpenNC v1 weights into the `.ncw` format
+(foundation/media/apm/docs/format.md), with every linear and GRU matrix
+quantised to int8 (one symmetric scale per output row); convolutions, biases
+and constants keep their f32 values. It runs on Origon's own inference engine
+(`apm::denoise`); no upstream code is bundled.
+
+Training data. The upstream weights were trained on the Microsoft DNS
+Challenge 4 datasets, MUSAN, and the openSLR 26/28 impulse responses.
+Microsoft redistributes the DNS Challenge data under the original terms it
+received them. Upstream lists these licences (OpenNC TRAINING.md):
+
+    Read speech      LibriVox                    public domain
+    Speech           VCTK                        ODC-By 1.0 (CC BY 4.0 at
+                                                 the Edinburgh source)
+    Speech           CREMA-D                     ODC Database Contents
+                                                 License 1.0
+    Noise            AudioSet                    CC BY 4.0
+    Noise            Freesound                   CC0
+    Music noise      MUSAN                       CC BY 4.0
+    Reverb           openSLR 26/28 impulse       Apache 2.0
+                     responses
+
+The table above carries upstream's attribution for VCTK, AudioSet, MUSAN and
+CREMA-D; upstream's model card is the fuller record. Source: OpenNC NOTICE
+and TRAINING.md, read 2026-10-31.

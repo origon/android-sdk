@@ -53,6 +53,7 @@ android {
     sourceSets {
         getByName("main") {
             jniLibs.srcDirs("src/main/jniLibs")
+            assets.srcDir(rootProject.file("THIRD_PARTY_NOTICES"))
         }
     }
 }
