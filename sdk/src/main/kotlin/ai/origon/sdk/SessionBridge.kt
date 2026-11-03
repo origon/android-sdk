@@ -81,6 +81,9 @@ internal object SessionBridge {
     /** Whether this ABI has OpenNC: `arm64-v8a` and `x86_64`, not `armeabi-v7a`. */
     @JvmStatic external fun noiseSuppressionSupported(): Boolean
 
+    /** `{active, reason}` JSON: what capture's noise suppression is now. */
+    @JvmStatic external fun noiseSuppressionState(): String?
+
     @JvmStatic external fun destroy(handle: Long)
 
     /**
@@ -365,6 +368,10 @@ internal object SessionBridge {
      *  the `{reason, acw?}` payload as JSON. No `EVENT_DISCONNECTED`
      *  follows. Mirrors `SESSION_EVENT_CHAT_SESSION_ENDED` in `jni_bridge.rs`. */
     const val EVENT_CHAT_SESSION_ENDED = 15
+
+    /** Capture's noise suppression changed — `messageJson` carries
+     *  `{active, reason}`. Mirrors `SESSION_EVENT_NOISE_SUPPRESSION_CHANGED`. */
+    const val EVENT_NOISE_SUPPRESSION_CHANGED = 16
 
     // Error discriminants — value of SessionException.kind.
     const val ERROR_NOT_INITIALIZED = 1

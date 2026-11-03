@@ -807,6 +807,11 @@ class OrigonClient(
                     route = AudioOutputRoute.fromBridge(raw.audioRoute),
                 )
 
+            SessionBridge.EVENT_NOISE_SUPPRESSION_CHANGED -> {
+                val state = decodeNoiseSuppression(raw.messageJson) ?: return null
+                ClientEvent.NoiseSuppressionChanged(sid, state.active, state.reason)
+            }
+
             else -> null
         }
     }
@@ -872,6 +877,18 @@ class OrigonClient(
         /** Whether this device's ABI has OpenNC noise suppression. */
         val noiseSuppressionSupported: Boolean
             get() = SessionBridge.noiseSuppressionSupported()
+
+        /** What the SDK's noise suppression is now, process-wide. Every change also
+         *  arrives as [ClientEvent.NoiseSuppressionChanged] on each voice session. */
+        val noiseSuppressionState: NoiseSuppressionState
+            get() = decodeNoiseSuppression(SessionBridge.noiseSuppressionState())
+                ?: NoiseSuppressionState(active = false, reason = NoiseSuppressionReason.UNSUPPORTED)
+
+        /** Decode the `{active, reason}` JSON the bridge carries. */
+        internal fun decodeNoiseSuppression(json: String?): NoiseSuppressionState? {
+            if (json.isNullOrEmpty()) return null
+            return runCatching { JSON.decodeFromString(NoiseSuppressionState.serializer(), json) }.getOrNull()
+        }
 
         /**
          * Turn OpenNC noise suppression on or off for the whole process, for every

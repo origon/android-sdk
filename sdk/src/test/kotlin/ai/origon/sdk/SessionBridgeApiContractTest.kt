@@ -58,6 +58,11 @@ class SessionBridgeApiContractTest {
         )
         assertEquals(
             String::class.java,
+            bridge.getDeclaredMethod("noiseSuppressionState").returnType,
+        )
+        assertEquals(16, SessionBridge.EVENT_NOISE_SUPPRESSION_CHANGED)
+        assertEquals(
+            String::class.java,
             bridge.getDeclaredMethod("serverConfig", Long::class.javaPrimitiveType).returnType,
         )
         assertEquals(

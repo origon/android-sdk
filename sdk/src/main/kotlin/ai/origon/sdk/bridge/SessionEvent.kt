@@ -28,6 +28,7 @@ package ai.origon.sdk.bridge
  * | `EVENT_CALL_ERROR`               | `sessionId`, `callErrorPresent`, `callErrorMessage`                     |
  * | `EVENT_AUDIO_ROUTE_CHANGED`      | `sessionId`, `audioRoute`                                              |
  * | `EVENT_CHAT_SESSION_ENDED`       | `sessionId`, `messageJson` (`{reason, acw?}` serialized as JSON)        |
+ * | `EVENT_NOISE_SUPPRESSION_CHANGED` | `sessionId`, `messageJson` (`{active, reason}` serialized as JSON)     |
  */
 internal class SessionEvent {
     @JvmField var kind: Int = 0

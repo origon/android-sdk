@@ -35,6 +35,8 @@
 -keep class ai.origon.sdk.DisconnectReason$* { *; }
 -keep class ai.origon.sdk.ClientEvent { *; }
 -keep class ai.origon.sdk.ClientEvent$* { *; }
+-keep class ai.origon.sdk.NoiseSuppressionReason { *; }
+-keep class ai.origon.sdk.NoiseSuppressionState { *; }
 
 # JNI bridge — Rust side resolves these classes / fields by name, so
 # they must not be renamed or have members stripped.

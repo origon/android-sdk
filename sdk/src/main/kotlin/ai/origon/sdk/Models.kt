@@ -718,6 +718,31 @@ data class Acw(
     val dispositions: List<String> = emptyList(),
 )
 
+/** Why the SDK's OpenNC noise suppression is not what capture runs. */
+@Serializable
+enum class NoiseSuppressionReason {
+    /** OpenNC runs, or will at the next capture. */
+    @SerialName("none") NONE,
+    /** The user turned it off. */
+    @SerialName("userOff") USER_OFF,
+    /** The device fell behind; capture runs the lighter suppressor until a retry takes. */
+    @SerialName("slowDevice") SLOW_DEVICE,
+    /** No model is installed yet. */
+    @SerialName("modelUnavailable") MODEL_UNAVAILABLE,
+    /** This ABI has no OpenNC stage (`armeabi-v7a`). */
+    @SerialName("unsupported") UNSUPPORTED,
+}
+
+/** What the SDK's noise suppression is: [OrigonClient.noiseSuppressionState] and
+ *  [ClientEvent.NoiseSuppressionChanged]. */
+@Serializable
+data class NoiseSuppressionState(
+    /** OpenNC runs, or will at the next capture. */
+    val active: Boolean,
+    /** Why not, when [active] is false; [NoiseSuppressionReason.NONE] when it is. */
+    val reason: NoiseSuppressionReason,
+)
+
 /** Decoded shape of the `EVENT_CHAT_SESSION_ENDED` `messageJson` slot. */
 @Serializable
 internal data class ChatSessionEndedPayload(
@@ -888,5 +913,16 @@ sealed class ClientEvent {
     data class AudioRouteChanged(
         override val sessionId: String,
         val route: AudioOutputRoute,
+    ) : ClientEvent()
+
+    /**
+     * The SDK's noise suppression changed: OpenNC engaged, a fallback on a slow
+     * device, a retry taking, the user's choice, a model landing. Show a short
+     * note when [reason] is [NoiseSuppressionReason.SLOW_DEVICE] mid-call.
+     */
+    data class NoiseSuppressionChanged(
+        override val sessionId: String,
+        val active: Boolean,
+        val reason: NoiseSuppressionReason,
     ) : ClientEvent()
 }
