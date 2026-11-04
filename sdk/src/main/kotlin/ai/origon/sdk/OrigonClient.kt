@@ -874,7 +874,7 @@ class OrigonClient(
             return digit
         }
 
-        /** Whether this device's ABI has OpenNC noise suppression. */
+        /** Whether this device's ABI has denoiser noise suppression. */
         val noiseSuppressionSupported: Boolean
             get() = SessionBridge.noiseSuppressionSupported()
 
@@ -891,7 +891,7 @@ class OrigonClient(
         }
 
         /**
-         * Turn OpenNC noise suppression on or off for the whole process, for every
+         * Turn denoiser noise suppression on or off for the whole process, for every
          * client and any call in progress. It works with no client open and wins
          * over [ClientConfig.noiseSuppression]. Off uses the SDK's other noise
          * suppressor; on fetches the model if it is missing. Does nothing on an

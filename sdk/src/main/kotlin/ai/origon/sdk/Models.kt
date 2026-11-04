@@ -214,7 +214,7 @@ data class ClientConfig(
     /** Durable transcript cache is enabled unless explicitly disabled. */
     val chatCachePolicy: ChatCachePolicy = ChatCachePolicy.ENABLED,
     /**
-     * Whether OpenNC noise suppression is wanted on a supported ABI. It applies
+     * Whether denoiser noise suppression is wanted on a supported ABI. It applies
      * until [OrigonClient.setNoiseSuppression] chooses, so a recreated client
      * never undoes a user's toggle.
      */
@@ -718,10 +718,10 @@ data class Acw(
     val dispositions: List<String> = emptyList(),
 )
 
-/** Why the SDK's OpenNC noise suppression is not what capture runs. */
+/** Why the SDK's denoiser noise suppression is not what capture runs. */
 @Serializable
 enum class NoiseSuppressionReason {
-    /** OpenNC runs, or will at the next capture. */
+    /** The denoiser runs, or will at the next capture. */
     @SerialName("none") NONE,
     /** The user turned it off. */
     @SerialName("userOff") USER_OFF,
@@ -729,7 +729,7 @@ enum class NoiseSuppressionReason {
     @SerialName("slowDevice") SLOW_DEVICE,
     /** No model is installed yet. */
     @SerialName("modelUnavailable") MODEL_UNAVAILABLE,
-    /** This ABI has no OpenNC stage (`armeabi-v7a`). */
+    /** This ABI has no denoiser stage (`armeabi-v7a`). */
     @SerialName("unsupported") UNSUPPORTED,
 }
 
@@ -737,7 +737,7 @@ enum class NoiseSuppressionReason {
  *  [ClientEvent.NoiseSuppressionChanged]. */
 @Serializable
 data class NoiseSuppressionState(
-    /** OpenNC runs, or will at the next capture. */
+    /** The denoiser runs, or will at the next capture. */
     val active: Boolean,
     /** Why not, when [active] is false; [NoiseSuppressionReason.NONE] when it is. */
     val reason: NoiseSuppressionReason,
@@ -916,7 +916,7 @@ sealed class ClientEvent {
     ) : ClientEvent()
 
     /**
-     * The SDK's noise suppression changed: OpenNC engaged, a fallback on a slow
+     * The SDK's noise suppression changed: the denoiser engaged, a fallback on a slow
      * device, a retry taking, the user's choice, a model landing. Show a short
      * note when [reason] is [NoiseSuppressionReason.SLOW_DEVICE] mid-call.
      */

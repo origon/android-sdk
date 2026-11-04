@@ -73,12 +73,12 @@ internal object SessionBridge {
     ): Long
 
     /**
-     * Turn OpenNC noise suppression on or off for the whole process. Builds a
+     * Turn denoiser noise suppression on or off for the whole process. Builds a
      * capture chain, so call it off the main thread.
      */
     @JvmStatic external fun setNoiseSuppression(enabled: Boolean)
 
-    /** Whether this ABI has OpenNC: `arm64-v8a` and `x86_64`, not `armeabi-v7a`. */
+    /** Whether this ABI has the denoiser: `arm64-v8a` and `x86_64`, not `armeabi-v7a`. */
     @JvmStatic external fun noiseSuppressionSupported(): Boolean
 
     /** `{active, reason}` JSON: what capture's noise suppression is now. */
