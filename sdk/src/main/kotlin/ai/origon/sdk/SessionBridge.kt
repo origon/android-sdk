@@ -70,6 +70,7 @@ internal object SessionBridge {
         cacheDir: String?,
         modelsDir: String?,
         noiseSuppression: Boolean,
+        playoutNoiseSuppression: Boolean,
     ): Long
 
     /**
@@ -77,6 +78,12 @@ internal object SessionBridge {
      * capture chain, so call it off the main thread.
      */
     @JvmStatic external fun setNoiseSuppression(enabled: Boolean)
+
+    /**
+     * Turn denoiser noise suppression of what callers send (playout) on or off
+     * for the whole process. Only records the choice: any thread may call it.
+     */
+    @JvmStatic external fun setPlayoutNoiseSuppression(enabled: Boolean)
 
     /** Whether this ABI has the denoiser: `arm64-v8a` and `x86_64`, not `armeabi-v7a`. */
     @JvmStatic external fun noiseSuppressionSupported(): Boolean

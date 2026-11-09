@@ -581,6 +581,7 @@ requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, a
 | `cachedSession(s)` / `refreshSession(s)` | Explicit suspend cache-only / network-only reads. |
 | `removeCachedSession` / `clearChatCache` / `pruneChatCache` | Suspend cache maintenance scoped to this client. |
 | `OrigonClient.setNoiseSuppression(enabled)` | Suspending. Turns denoiser noise suppression on or off for the process, live, with or without a client; on fetches the model if it is missing. |
+| `OrigonClient.setPlayoutNoiseSuppression(enabled)` | Not suspending. Turns denoiser noise suppression of what callers send (playout) on or off for the process, live, with or without a client; independent of `setNoiseSuppression`. Mid-call, on adds the denoiser's delay and fades in; off fades out and drops the delay. |
 | `OrigonClient.noiseSuppressionSupported` | Whether this ABI has the denoiser: `arm64-v8a` and `x86_64`, not `armeabi-v7a`. |
 | `OrigonClient.clearAllChatCaches(context)` | Handle-independent cache-root quarantine; close live clients first. |
 | `setAttributes(attributes)` | Replace session-level attributes injected on the next start. |
@@ -594,7 +595,7 @@ requires all three ABIs, no `.symtab`, all continuity/cache-first JNI exports, a
 
 | Type | Description |
 | --- | --- |
-| `ClientConfig` | endpoint, optional `token`, optional `userId`, attributes, default-on `chatCachePolicy`, and default-on `noiseSuppression`, which applies until `setNoiseSuppression` chooses. The app package is resolved from `Context`; `userId` defaults to the random no-backup app-install id. |
+| `ClientConfig` | endpoint, optional `token`, optional `userId`, attributes, default-on `chatCachePolicy`, default-on `noiseSuppression`, which applies until `setNoiseSuppression` chooses, and default-on `playoutNoiseSuppression`, which applies until `setPlayoutNoiseSuppression` chooses. The app package is resolved from `Context`; `userId` defaults to the random no-backup app-install id. |
 | `Channel` | `CHAT`, `VOICE`. |
 | `SessionControl` | `AI`, `USER`. |
 | `MessageRole` | `AI`, `EXTERNAL`, `USER`, `SYSTEM`. |

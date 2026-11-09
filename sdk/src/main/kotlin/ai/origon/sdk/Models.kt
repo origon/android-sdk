@@ -219,6 +219,12 @@ data class ClientConfig(
      * never undoes a user's toggle.
      */
     val noiseSuppression: Boolean = true,
+    /**
+     * Whether denoiser noise suppression of what callers send (playout) is wanted
+     * on a supported ABI. It applies until [OrigonClient.setPlayoutNoiseSuppression]
+     * chooses, so a recreated client never undoes a user's toggle.
+     */
+    val playoutNoiseSuppression: Boolean = true,
 )
 
 enum class ChatCachePolicy { ENABLED, DISABLED }

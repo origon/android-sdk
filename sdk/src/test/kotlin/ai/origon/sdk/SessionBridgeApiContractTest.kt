@@ -43,6 +43,7 @@ class SessionBridgeApiContractTest {
                 String::class.java,
                 String::class.java,
                 Boolean::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType,
             ).returnType,
         )
         assertEquals(
@@ -52,6 +53,22 @@ class SessionBridgeApiContractTest {
                 Boolean::class.javaPrimitiveType,
             ).returnType,
         )
+        assertEquals(
+            Void.TYPE,
+            bridge.getDeclaredMethod(
+                "setPlayoutNoiseSuppression",
+                Boolean::class.javaPrimitiveType,
+            ).returnType,
+        )
+        // The process-wide Kotlin setter is a plain (non-suspending) static call.
+        assertEquals(
+            Void.TYPE,
+            OrigonClient.Companion::class.java.getDeclaredMethod(
+                "setPlayoutNoiseSuppression",
+                Boolean::class.javaPrimitiveType,
+            ).returnType,
+        )
+        assertTrue(ClientConfig(endpoint = "https://example.test").playoutNoiseSuppression)
         assertEquals(
             Boolean::class.javaPrimitiveType,
             bridge.getDeclaredMethod("noiseSuppressionSupported").returnType,

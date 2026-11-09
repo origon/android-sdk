@@ -85,6 +85,10 @@ registers cross-repository contracts that must change and validate together.
 - The JNI ABI is consumed as one hardcut: `initialize(... installationId, cacheDir ...)`,
   required `SessionSummary.active`, `restoreActiveChats`, `openChat`,
   generation-returning `registerPush`, and generation-bound `unregisterPush`.
+  `initialize(... modelsDir, noiseSuppression, playoutNoiseSuppression)` and
+  `setPlayoutNoiseSuppression(Boolean)` change together with the producer: Kotlin
+  `ClientConfig.playoutNoiseSuppression` (named, default `true`) and the
+  non-suspending, process-wide `OrigonClient.setPlayoutNoiseSuppression(enabled)`.
   The producer is `workspace/apps/sdk/session/src/jni_bridge.rs`; reciprocal
   registration is in `workspace/apps/sdk/CONTRACT.md` and
   `workspace/apps/sdk/session/docs/contract.md`.

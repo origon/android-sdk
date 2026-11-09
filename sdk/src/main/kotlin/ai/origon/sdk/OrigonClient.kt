@@ -55,6 +55,7 @@ class OrigonClient(
         cacheDir = cacheRoot?.absolutePath,
         modelsDir = modelsDir?.absolutePath,
         noiseSuppression = config.noiseSuppression,
+        playoutNoiseSuppression = config.playoutNoiseSuppression,
     )
     private val nativeGate = NativeHandleGate(rawHandle)
     private val audioLevelObservations = AudioLevelObservationRegistry()
@@ -899,6 +900,19 @@ class OrigonClient(
          */
         suspend fun setNoiseSuppression(enabled: Boolean) {
             withContext(Dispatchers.IO) { SessionBridge.setNoiseSuppression(enabled) }
+        }
+
+        /**
+         * Turn denoiser noise suppression of what callers send (playout) on or off
+         * for the whole process, for every client and any call in progress. It works
+         * with no client open and wins over [ClientConfig.playoutNoiseSuppression].
+         * Turned on mid-call, playout takes the denoiser's delay at once and fades it
+         * in; turned off, it fades out and drops the delay. Independent of
+         * [setNoiseSuppression]. Does nothing on an unsupported ABI. Cheap: any
+         * thread may call it.
+         */
+        fun setPlayoutNoiseSuppression(enabled: Boolean) {
+            SessionBridge.setPlayoutNoiseSuppression(enabled)
         }
 
         /**
