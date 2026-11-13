@@ -100,6 +100,9 @@ class OrigonClient(
 
     private fun <T> withHandle(block: (Long) -> T): T = nativeGate.withHandle(block)
 
+    /** Lease the native handle for [OrpcSession.open]. */
+    internal fun <T> withNativeHandle(block: (Long) -> T): T = nativeGate.withHandle(block)
+
     // ── Cached /config getters ───────────────────────────────────────
 
     val serverConfig: ServerConfig
