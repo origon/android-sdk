@@ -1,6 +1,8 @@
 package ai.origon.sdk
 
 import ai.origon.sdk.bridge.AudioLevelsNextBridge
+import ai.origon.sdk.bridge.OrpcCallResult
+import ai.origon.sdk.bridge.OrpcNextResult
 import ai.origon.sdk.bridge.SessionEvent
 import ai.origon.sdk.bridge.SessionLoaderResult
 import ai.origon.sdk.bridge.StartSessionResponse
@@ -121,6 +123,44 @@ internal object SessionBridge {
     @JvmStatic external fun clearChatCache(handle: Long)
     @JvmStatic external fun pruneChatCache(handle: Long)
     @JvmStatic external fun clearChatCacheRoot(cacheRoot: String)
+
+    // ── Product-free oRPC client (Program MW) ────────────────────────
+    // Bytes only: paths, metadata and payloads belong to the caller.
+    // `keys` and `values` are parallel arrays. Errors throw
+    // [SessionException] with kind ERROR_ORPC_*.
+
+    /** Blocking: dial the url's host on gw's `orpc-2` :443 and open stream 1. */
+    @JvmStatic external fun orpcOpen(
+        handle: Long,
+        url: String,
+        path: String,
+        keys: Array<String>,
+        values: Array<ByteArray>,
+        body: ByteArray,
+    ): OrpcCallResult
+    /** Blocking: re-open the session-open stream; null when stale. */
+    @JvmStatic external fun orpcReopen(
+        orpc: Long,
+        path: String,
+        keys: Array<String>,
+        values: Array<ByteArray>,
+        body: ByteArray,
+        expectedGeneration: Long,
+    ): OrpcCallResult?
+    @JvmStatic external fun orpcUnary(
+        orpc: Long,
+        path: String,
+        keys: Array<String>,
+        values: Array<ByteArray>,
+        body: ByteArray,
+        timeoutMs: Int,
+    ): ByteArray
+    /** Blocking; one caller at a time. */
+    @JvmStatic external fun orpcNext(orpc: Long): OrpcNextResult
+    @JvmStatic external fun orpcEnd(orpc: Long)
+    @JvmStatic external fun orpcCancel(orpc: Long)
+    /** Only after every [orpcNext] has returned. */
+    @JvmStatic external fun orpcFree(orpc: Long)
 
     // ── Per-session lifecycle ────────────────────────────────────────
 
@@ -388,6 +428,25 @@ internal object SessionBridge {
     const val ERROR_CANCELLED = 9
     const val ERROR_CHAT_REFUSED = 10
     const val ERROR_CHAT_END = 11 // code: pending or unconfirmed
+    const val ERROR_ORPC_REJECTED = 12 // code: numeric orpc code (decimal), message: reason
+    const val ERROR_ORPC_UNAVAILABLE = 13
+    const val ERROR_ORPC_TIMEOUT = 14
+    const val ERROR_ORPC_INVALID = 15
+
+    const val ORPC_NEXT_FRAME = 1
+    const val ORPC_NEXT_STREAM_ENDED = 2
+    const val ORPC_NEXT_STATUS = 3
+    const val ORPC_NEXT_TERMINAL = 4
+    const val ORPC_NEXT_CLOSED = 5
+    const val ORPC_NEXT_CANCELLED = 6
+
+    const val ORPC_STATUS_CONNECTING = 0
+    const val ORPC_STATUS_LIVE = 1
+    const val ORPC_STATUS_RECONNECTING = 2
+
+    const val ORPC_TERMINAL_ENDED = 1
+    const val ORPC_TERMINAL_SESSION_ENDED = 2
+    const val ORPC_TERMINAL_OVERFLOW = 3
 
     // Disconnect reason discriminants — value of SessionEvent.disconnectReasonKind.
     const val DISCONNECT_REASON_LOCAL_CLOSE = 1
