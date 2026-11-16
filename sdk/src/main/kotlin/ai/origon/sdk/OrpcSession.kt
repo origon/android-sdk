@@ -121,10 +121,22 @@ class OrpcSession internal constructor(
     companion object {
         /** Dial the url's host on gw's `orpc-2` :443 and open [request] as stream 1. */
         suspend fun open(client: OrigonClient, url: String, request: Request): Pair<OrpcSession, ByteArray> =
-            withContext(Dispatchers.IO) {
-                val result = client.withNativeHandle { handle ->
+            opened {
+                client.withNativeHandle { handle ->
                     SessionBridge.orpcOpen(handle, url, request.path, request.keys, request.values, request.body)
                 }
+            }
+
+        /**
+         * [open] without an [OrigonClient]: the session owns its own runtime, so a product can
+         * sign in over oRPC (for Dock, `cx.v1.Dock/Login`) before it can create a client.
+         */
+        suspend fun open(url: String, request: Request): Pair<OrpcSession, ByteArray> =
+            opened { SessionBridge.orpcOpenStandalone(url, request.path, request.keys, request.values, request.body) }
+
+        private suspend fun opened(call: () -> OrpcCallResult): Pair<OrpcSession, ByteArray> =
+            withContext(Dispatchers.IO) {
+                val result = call()
                 OrpcSession(result.orpc) to (result.response ?: ByteArray(0))
             }
 

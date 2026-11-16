@@ -85,6 +85,7 @@ class OrpcSessionTest {
         val long = Long::class.javaPrimitiveType
         val int = Int::class.javaPrimitiveType
         assertEquals(OrpcCallResult::class.java, bridge.getDeclaredMethod("orpcOpen", long, String::class.java, String::class.java, strings, byteArrays, bytes).returnType)
+        assertEquals(OrpcCallResult::class.java, bridge.getDeclaredMethod("orpcOpenStandalone", String::class.java, String::class.java, strings, byteArrays, bytes).returnType)
         assertEquals(OrpcCallResult::class.java, bridge.getDeclaredMethod("orpcReopen", long, String::class.java, strings, byteArrays, bytes, long).returnType)
         assertEquals(bytes, bridge.getDeclaredMethod("orpcUnary", long, String::class.java, strings, byteArrays, bytes, int).returnType)
         assertEquals(OrpcNextResult::class.java, bridge.getDeclaredMethod("orpcNext", long).returnType)

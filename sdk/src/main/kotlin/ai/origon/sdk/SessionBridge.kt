@@ -138,6 +138,14 @@ internal object SessionBridge {
         values: Array<ByteArray>,
         body: ByteArray,
     ): OrpcCallResult
+    /** Blocking: [orpcOpen] without a client; the oRPC session owns its own runtime. */
+    @JvmStatic external fun orpcOpenStandalone(
+        url: String,
+        path: String,
+        keys: Array<String>,
+        values: Array<ByteArray>,
+        body: ByteArray,
+    ): OrpcCallResult
     /** Blocking: re-open the session-open stream; null when stale. */
     @JvmStatic external fun orpcReopen(
         orpc: Long,
